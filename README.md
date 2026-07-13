@@ -1,17 +1,17 @@
-# linejs
+# lineclientbot
 
-LINE SelfBot client library for Node.js — based on [linejs](https://github.com/aspect-build/aspect-build/linejs-main).
+LINE client library for Node.js.
 
 ## Install
 
 ```bash
-npm install linejs
+npm install lineclientbot
 ```
 
 ## Quick Start
 
 ```typescript
-import { LineClient } from "linejs";
+import { LineClient } from "lineclientbot";
 
 // Login with auth token
 const line = new LineClient();
@@ -58,11 +58,11 @@ const line = new LineClient();
 await line.login({ authToken: "xxx" });
 
 // With email/password
-const line = new LineClient();
-await line.login({ mail: "email@example.com", pass: "password" });
+const line2 = new LineClient();
+await line2.login({ mail: "email@example.com", pass: "password" });
 
 // QR Login with event callbacks
-const line = await LineClient.loginWithQR({
+const qrClient = await LineClient.loginWithQR({
     rememberMe: true,
     onQR: (url) => console.log("Scan:", url),
     onPin: (pin) => console.log("PIN:", pin),
@@ -150,16 +150,16 @@ line.listen();
 ### Storage
 
 ```typescript
-import { LineClient, FileStorage, MemoryStorage } from "linejs";
+import { LineClient, FileStorage, MemoryStorage } from "lineclientbot";
 
 // File-based storage (persists across restarts)
-const line = new LineClient({
+const lineWithFileStorage = new LineClient({
     authToken: "xxx",
     storage: "./line-data.json",
 });
 
 // Memory storage (default, no persistence)
-const line = new LineClient({
+const lineInMemory = new LineClient({
     authToken: "xxx",
     storage: false,
 });
