@@ -1,0 +1,54 @@
+{
+  "name": "linejs",
+  "version": "0.1.0",
+  "description": "LINE client library for Node.js",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/types/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json && node scripts/fix-cjs.js",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build": "npm run build:esm && npm run build:cjs && npm run build:types",
+    "test": "node test/run.js",
+    "test:bot": "node test/bot.js",
+    "test:upload": "node test/upload.js",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "line",
+    "line-messenger",
+    "selfbot",
+    "linejs",
+    "bot"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "crypto-js": "^4.2.0",
+    "curve25519-js": "^0.0.4",
+    "node-bignumber": "^1.2.2",
+    "node-int64": "^0.4.0",
+    "thrift": "^0.20.0",
+    "tweetnacl": "^1.0.3",
+    "undici": "^8.7.0"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.0",
+    "@types/node": "^20.0.0",
+    "@types/thrift": "^0.10.17",
+    "typescript": "^5.5.0"
+  }
+}
