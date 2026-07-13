@@ -35,6 +35,10 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tatsuyato/lineclientbot.git"
+  },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
     "crypto-js": "^4.2.0",
