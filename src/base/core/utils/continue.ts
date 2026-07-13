@@ -12,6 +12,9 @@ export async function continueRequest<
 }): Promise<ReturnType<H>> {
 	function objectSum<O>(base: O, add: O): O {
 		for (const key in add) {
+			if (key === "__proto__" || key === "constructor" || key === "prototype") {
+				continue;
+			}
 			if (Object.prototype.hasOwnProperty.call(add, key)) {
 				const value = add[key];
 				if (typeof value === "object") {
