@@ -31,6 +31,17 @@ line.listen();
 
 If you want the library to remember the login automatically, pass `rememberMe: true` or `rememberMe: "./my-token.txt"`.
 
+The client also exposes a categorized facade for the most common flows:
+
+```typescript
+const line = new LineClient();
+await line.api.auth.login({ authToken: "YOUR_AUTH_TOKEN" });
+await line.api.messages.sendText("u1234567890abcdef1234567890abcdef", "Hello!");
+const profile = await line.api.profile.get();
+```
+
+The original top-level methods still work for compatibility, but the grouped API keeps related actions together.
+
 ## API
 
 ### Constructor

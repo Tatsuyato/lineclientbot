@@ -13,7 +13,7 @@
  *   - Run until you press Ctrl+C
  */
 
-const { LineClient } = require('../dist/cjs/index.js');
+let LineClient;
 
 const args = process.argv.slice(2);
 function getArg(name) {
@@ -27,6 +27,8 @@ const PASSWORD = getArg('password');
 const QR = args.includes('--qr');
 
 async function main() {
+  const lib = await import('../dist/esm/index.js');
+  LineClient = lib.LineClient;
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('  linejs - Echo Bot');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');

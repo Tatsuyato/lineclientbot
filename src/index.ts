@@ -1,4 +1,15 @@
-export { LineClient, TalkMessage, SquareMessage } from "./lineclient.js";
+export {
+	LineClient,
+	LineClientApi,
+	BaseChannel,
+	BaseMessage,
+	ChatChannel,
+	Message,
+	SquareChatChannel,
+	SquareMessage,
+	TalkMessage,
+	User,
+} from "./lineclient.js";
 export type {
 	LineClientOptions,
 	ClientEvents,

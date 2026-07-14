@@ -151,21 +151,28 @@ export class Polling {
 			cb && cb();
 			return;
 		}
+		this.islisten = true;
+		let retryDelay = 1000;
+		const maxRetryDelay = 60000;
 		while (this.client.authToken) {
-			this.islisten = true;
 			try {
 				await this.client.push.initializeConn(1, this.listenTarget);
+				retryDelay = 1000;
 			} catch (error) {
 				this.client.log("LegyPusherError_cannot_init", { error });
-				throw error;
+				await sleep(retryDelay);
+				retryDelay = Math.min(retryDelay * 2, maxRetryDelay);
+				continue;
 			}
 			try {
 				cb && cb();
 				await this.client.push.InitAndRead(this.listenTarget);
-				await sleep(4000);
+				retryDelay = 1000;
+				await sleep(retryDelay);
 			} catch (error) {
 				this.client.log("LegyPusherError", { error });
-				await sleep(4000);
+				await sleep(retryDelay);
+				retryDelay = Math.min(retryDelay * 2, maxRetryDelay);
 			}
 		}
 		this.islisten = false;

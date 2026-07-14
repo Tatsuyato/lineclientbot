@@ -8,7 +8,7 @@
  *   node test/run.js --qr
  */
 
-const { LineClient } = require('../dist/cjs/index.js');
+let LineClient;
 
 // Parse args
 const args = process.argv.slice(2);
@@ -102,7 +102,7 @@ async function testEvents() {
 async function testStorage() {
   console.log(`\n${B}━━━ Test 3: Storage ━━━${W}`);
 
-  const { MemoryStorage } = require('../dist/cjs/index.js');
+  const { MemoryStorage } = await import('../dist/esm/index.js');
 
   const mem = new MemoryStorage();
   await mem.set('key1', 'value1');
@@ -282,6 +282,8 @@ async function testChatOps(c) {
 // Main
 // ============================================================
 async function main() {
+  const lib = await import('../dist/esm/index.js');
+  LineClient = lib.LineClient;
   console.log(`${B}╔════════════════════════════════════════════╗${W}`);
   console.log(`${B}║   linejs - Real Usage Test                 ║${W}`);
   console.log(`${B}╚════════════════════════════════════════════╝${W}`);
