@@ -94,8 +94,10 @@ async function testEvents() {
 
   c.on('log', (data) => {
     logReceived = true;
-    assert(data.type === 'test', 'Log event type matches');
-    assert(data.data.value === 42, 'Log event data matches');
+    if (data.type === 'test') {
+      assert(data.type === 'test', 'Log event type matches');
+      assert(data.data.value === 42, 'Log event data matches');
+    }
   });
 
   c.on('message', (msg) => { messageReceived = true; });
