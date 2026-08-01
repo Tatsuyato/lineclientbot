@@ -89,9 +89,11 @@ export interface LineClientOptions {
 
 export type ClientEvents = {
 	message: (message: Message) => void;
+	messageCreate: (message: Message) => void;
 	event: (event: LINETypes.Operation) => void;
 	"square:message": (message: SquareMessage) => void;
 	"square:event": (event: LINETypes.SquareEvent) => void;
+	ready: (user: User) => void;
 	log: (data: { type: string; data: any }) => void;
 };
 
@@ -153,6 +155,14 @@ export interface LineClientApi {
 		getServerTime: () => Promise<number>;
 		noop: () => Promise<void>;
 	};
+}
+
+export interface UserManager {
+	fetch: (userMid: string) => Promise<User>;
+}
+
+export interface ChannelManager {
+	fetch: (chatMid: string) => Promise<ChatChannel>;
 }
 
 // ====== Public Classes (discord.js inspired) ======
@@ -325,6 +335,8 @@ export class SquareMessage extends BaseMessage {
 export class LineClient {
 	readonly base: BaseClient;
 	readonly api: LineClientApi;
+	readonly users: UserManager;
+	readonly channels: ChannelManager;
 	private _storage: BaseStorage;
 	private _loggedIn: boolean = false;
 	private readonly _rememberPath?: string;
@@ -413,6 +425,14 @@ export class LineClient {
 				noop: () => this.noop(),
 			},
 		};
+
+		this.users = {
+			fetch: async (userMid: string) => new User(this, await this.getContact(userMid)),
+		};
+
+		this.channels = {
+			fetch: async (chatMid: string) => new ChatChannel(this, chatMid, await this.getChat(chatMid)),
+		};
 	}
 
 	// ====== Properties ======
@@ -422,6 +442,7 @@ export class LineClient {
 	get storage(): BaseStorage { return this._storage; }
 	get authToken(): string | undefined { return this.base.authToken; }
 	get profile(): LINETypes.Profile | undefined { return this.base.profile; }
+	get user(): User | undefined { return this.profile ? new User(this, this.profile) : undefined; }
 	get isLoggedIn(): boolean { return this._loggedIn; }
 	get poll(): Polling { return this.base.poll; }
 
@@ -435,7 +456,12 @@ export class LineClient {
 		}
 	}
 
-	async login(options?: LineClientOptions): Promise<LINETypes.Profile> {
+	async login(authToken: string): Promise<LINETypes.Profile>;
+	async login(options?: LineClientOptions): Promise<LINETypes.Profile>;
+	async login(optionsOrAuthToken?: LineClientOptions | string): Promise<LINETypes.Profile> {
+		const options = typeof optionsOrAuthToken === "string"
+			? { authToken: optionsOrAuthToken }
+			: optionsOrAuthToken;
 		const secret = options?.rememberMeSecret ?? this._rememberMeSecret;
 		if (options?.authToken) {
 			await this.base.loginProcess.login({ authToken: options.authToken });
@@ -444,6 +470,7 @@ export class LineClient {
 			if (this._rememberPath && this.base.authToken) {
 				await writeRememberedToken(this._rememberPath, this.base.authToken, secret);
 			}
+			this.base.emit("ready" as any, this.user!);
 			return this.base.profile!;
 		}
 
@@ -455,6 +482,7 @@ export class LineClient {
 					await this.base.loginProcess.login({ authToken: rememberedToken });
 					this._loggedIn = true;
 					await this.ensureE2EEKeyPair();
+					this.base.emit("ready" as any, this.user!);
 					return this.base.profile!;
 				} catch {
 					// Fall through to the explicit login flow.
@@ -477,6 +505,7 @@ export class LineClient {
 		if (rememberPath && this.base.authToken) {
 			await writeRememberedToken(rememberPath, this.base.authToken, secret);
 		}
+		this.base.emit("ready" as any, this.user!);
 		return this.base.profile!;
 	}
 
@@ -497,6 +526,7 @@ export class LineClient {
 			if (rememberPath && client.base.authToken) {
 				await writeRememberedToken(rememberPath, client.base.authToken, secret);
 			}
+			client.base.emit("ready" as any, client.user!);
 			return client;
 		}
 
@@ -507,6 +537,7 @@ export class LineClient {
 					await client.base.loginProcess.login({ authToken: rememberedToken });
 					client._loggedIn = true;
 					await client.ensureE2EEKeyPair();
+					client.base.emit("ready" as any, client.user!);
 					return client;
 				} catch {
 					// Fall through to QR login.
@@ -527,6 +558,7 @@ export class LineClient {
 		if (rememberPath && client.base.authToken) {
 			await writeRememberedToken(rememberPath, client.base.authToken, secret);
 		}
+		client.base.emit("ready" as any, client.user!);
 		return client;
 	}
 
@@ -774,13 +806,17 @@ export class LineClient {
 		const decryptAndEmit = async (event: any) => {
 			try {
 				const msg = await this.base.e2ee.decryptE2EEMessage(event.message);
-				this.base.emit("message" as any, await buildTalkMessage(msg));
+				const built = await buildTalkMessage(msg);
+				this.base.emit("message" as any, built);
+				this.base.emit("messageCreate" as any, built);
 			} catch (error) {
 				if (error instanceof Error && error.message.includes("E2EE Key has not been saved")) {
 					try {
 						await this.ensureE2EEKeyPair();
 						const msg = await this.base.e2ee.decryptE2EEMessage(event.message);
-						this.base.emit("message" as any, await buildTalkMessage(msg));
+						const built = await buildTalkMessage(msg);
+						this.base.emit("message" as any, built);
+						this.base.emit("messageCreate" as any, built);
 						return;
 					} catch (retryError) {
 						this.base.emit("log" as any, {
@@ -899,6 +935,15 @@ export class LineClient {
 
 	on<K extends keyof ClientEvents>(event: K, listener: (...args: ClientEvents[K] extends (...a: infer P) => any ? P : never) => void): this {
 		this.base.on(event as any, listener as any);
+		return this;
+	}
+
+	once<K extends keyof ClientEvents>(event: K, listener: (...args: ClientEvents[K] extends (...a: infer P) => any ? P : never) => void): this {
+		const onceListener = ((...args: any[]) => {
+			this.base.off(event as any, onceListener as any);
+			(listener as any)(...args);
+		}) as any;
+		this.base.on(event as any, onceListener);
 		return this;
 	}
 

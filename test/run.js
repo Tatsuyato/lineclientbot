@@ -65,7 +65,11 @@ async function testConstructor() {
   assert(typeof c1.listen === 'function', 'listen() exists');
   assert(typeof c1.getChats === 'function', 'getChats() exists');
   assert(typeof c1.on === 'function', 'on() exists');
+  assert(typeof c1.once === 'function', 'once() exists');
   assert(typeof c1.api === 'object', 'api facade exists');
+  assert(typeof c1.users.fetch === 'function', 'users.fetch() exists');
+  assert(typeof c1.channels.fetch === 'function', 'channels.fetch() exists');
+  assert(c1.user === undefined, 'user is undefined before login');
   assert(typeof c1.api.auth.login === 'function', 'api.auth.login() exists');
   assert(typeof c1.api.profile.get === 'function', 'api.profile.get() exists');
   assert(typeof c1.api.messages.sendText === 'function', 'api.messages.sendText() exists');
@@ -85,6 +89,8 @@ async function testEvents() {
   const c = new LineClient();
   let logReceived = false;
   let messageReceived = false;
+  let messageCreateReceived = false;
+  let onceCount = 0;
 
   c.on('log', (data) => {
     logReceived = true;
@@ -93,12 +99,18 @@ async function testEvents() {
   });
 
   c.on('message', (msg) => { messageReceived = true; });
+  c.on('messageCreate', (msg) => { messageCreateReceived = true; });
+  c.once('log', () => { onceCount++; });
 
   // Trigger via base
   c.base.emit('log', { type: 'test', data: { value: 42 } });
+  c.base.emit('log', { type: 'test2', data: { value: 43 } });
+  c.base.emit('messageCreate', { text: 'hello' });
 
   await sleep(50);
   assert(logReceived, 'Log event listener triggered');
+  assert(messageCreateReceived, 'messageCreate alias listener triggered');
+  assert(onceCount === 1, 'once() listener runs once');
 
   // Test off
   c.off('log', () => {});

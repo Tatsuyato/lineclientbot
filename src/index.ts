@@ -14,6 +14,8 @@ export type {
 	LineClientOptions,
 	ClientEvents,
 	ListenOptions,
+	UserManager,
+	ChannelManager,
 } from "./lineclient.js";
 
 export { BaseStorage, MemoryStorage, FileStorage } from "./base/storage/mod.js";

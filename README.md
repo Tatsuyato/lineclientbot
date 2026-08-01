@@ -13,25 +13,25 @@ npm install lineclientbot
 ```typescript
 import { LineClient } from "lineclientbot";
 
-// Standardized API: use line.api.*
+// Discord-like style
 const line = new LineClient();
-await line.api.auth.login({ authToken: "YOUR_AUTH_TOKEN" });
+await line.login("YOUR_AUTH_TOKEN");
 
-// Send a message
-await line.api.messages.sendText("u1234567890abcdef1234567890abcdef", "Hello!");
+line.once("ready", (user) => {
+    console.log(`Logged in as ${user.displayName}`);
+});
 
-// Listen for messages
-line.on("message", async (msg) => {
-    console.log(`${msg.from}: ${msg.text}`);
+line.on("messageCreate", async (msg) => {
+    console.log(`${msg.author.displayName}: ${msg.text}`);
     await msg.reply(`Echo: ${msg.text}`);
 });
 
-line.api.listen.start();
+line.listen({ talk: true, square: true });
 ```
 
 If you want the library to remember the login automatically, pass `rememberMe: true` or `rememberMe: "./my-token.txt"`.
 
-The client also exposes a categorized facade for the most common flows:
+The client also exposes a categorized `line.api.*` facade for the most common flows:
 
 ```typescript
 const line = new LineClient();
@@ -41,6 +41,16 @@ const profile = await line.api.profile.get();
 ```
 
 The original top-level methods (for example `line.login()` and `line.sendMessage()`) still work for compatibility, but `line.api.*` is the standardized path.
+
+You can also use lightweight manager-style helpers for readability:
+
+```typescript
+const channel = await line.channels.fetch("c123...");
+await channel.send("Hello!");
+
+const user = await line.users.fetch("u123...");
+await user.send("Hi!");
+```
 
 ## API
 
@@ -144,7 +154,11 @@ await line.api.squares.leave(squareMid);
 ### Events
 
 ```typescript
-line.on("message", async (msg) => {
+line.once("ready", (user) => {
+    console.log(`Ready as ${user.displayName}`);
+});
+
+line.on("messageCreate", async (msg) => {
     console.log(msg.text);
     await msg.reply("Got it!");
     await msg.react("👍");
@@ -155,7 +169,7 @@ line.on("event", (event) => {
     console.log("Event:", event.type);
 });
 
-line.api.listen.start();
+line.listen({ talk: true, square: true });
 ```
 
 ### Storage
@@ -194,9 +208,11 @@ const lineInMemory = new LineClient({
 | Event | Callback | Description |
 |-------|----------|-------------|
 | `message` | `(msg: MessageEvent) => void` | New message received |
+| `messageCreate` | `(msg: MessageEvent) => void` | Alias of `message` (Discord-style) |
 | `event` | `(event: any) => void` | Any LINE event |
 | `square:message` | `(msg: MessageEvent) => void` | OpenChat message |
 | `square:event` | `(event: any) => void` | OpenChat event |
+| `ready` | `(user: User) => void` | Fired after successful login |
 | `log` | `(data: {type, data}) => void` | Debug logs |
 
 ## License
