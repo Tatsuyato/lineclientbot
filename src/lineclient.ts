@@ -777,6 +777,15 @@ export class LineClient {
 
 	// ====== Listen ======
 
+	private resolveTalkChannelId(raw: LINETypes.Message): string {
+		const myMid = this.base.profile?.mid;
+		const isDirectMessage = raw.toType === 0 || raw.toType === "USER";
+		if (isDirectMessage && myMid && raw.to === myMid && raw.from) {
+			return raw.from;
+		}
+		return raw.to || raw.from;
+	}
+
 	listen(opts: ListenOptions = { talk: true, square: true, mode: "push" }): void {
 		this.ensureLoggedIn();
 		const mode = opts.mode ?? "push";
@@ -789,7 +798,7 @@ export class LineClient {
 			} catch {
 				authorUser = new User(this, { id: raw.from });
 			}
-			const channel = new ChatChannel(this, raw.to);
+			const channel = new ChatChannel(this, this.resolveTalkChannelId(raw));
 			return new Message({
 				client: this,
 				raw,
