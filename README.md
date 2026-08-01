@@ -52,6 +52,12 @@ const user = await line.users.fetch("u123...");
 await user.send("Hi!");
 ```
 
+You can now import service classes directly from the package root, without using deep internal paths:
+
+```typescript
+import { TalkService, SquareService } from "lineclientbot";
+```
+
 ## API
 
 ### Constructor
