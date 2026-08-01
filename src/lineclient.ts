@@ -533,10 +533,12 @@ export class LineClient {
 	// ====== Profile ======
 
 	async getMyProfile(): Promise<LINETypes.Profile> {
+		this.ensureLoggedIn();
 		return await this.base.talk.getProfile();
 	}
 
 	async updateMyProfile(update: { displayName?: string; statusMessage?: string }): Promise<void> {
+		this.ensureLoggedIn();
 		const profile = await this.getMyProfile();
 		const attr: number[] = [];
 		const updatedProfile: any = { mid: profile.mid };

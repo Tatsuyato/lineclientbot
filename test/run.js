@@ -65,6 +65,15 @@ async function testConstructor() {
   assert(typeof c1.listen === 'function', 'listen() exists');
   assert(typeof c1.getChats === 'function', 'getChats() exists');
   assert(typeof c1.on === 'function', 'on() exists');
+  assert(typeof c1.api === 'object', 'api facade exists');
+  assert(typeof c1.api.auth.login === 'function', 'api.auth.login() exists');
+  assert(typeof c1.api.profile.get === 'function', 'api.profile.get() exists');
+  assert(typeof c1.api.messages.sendText === 'function', 'api.messages.sendText() exists');
+  assert(typeof c1.api.chats.list === 'function', 'api.chats.list() exists');
+  assert(typeof c1.api.contacts.list === 'function', 'api.contacts.list() exists');
+  assert(typeof c1.api.squares.list === 'function', 'api.squares.list() exists');
+  assert(typeof c1.api.listen.start === 'function', 'api.listen.start() exists');
+  assert(typeof c1.api.system.noop === 'function', 'api.system.noop() exists');
 }
 
 // ============================================================
@@ -122,7 +131,45 @@ async function testStorage() {
 }
 
 // ============================================================
-// Test 4: Login (requires credentials)
+// Test 4: API Standardization & Compatibility (offline)
+// ============================================================
+async function testApiStandardization() {
+  console.log(`\n${B}━━━ Test 4: API Standardization & Compatibility ━━━${W}`);
+
+  const c = new LineClient();
+  const authError = 'Not logged in. Call login() first.';
+
+  // Standardized auth guard message through both access paths
+  try {
+    await c.getMyProfile();
+    assert(false, 'getMyProfile should fail when not logged in');
+  } catch (e) {
+    assert(e.message === authError, 'getMyProfile uses standardized auth error');
+  }
+
+  try {
+    await c.api.profile.get();
+    assert(false, 'api.profile.get should fail when not logged in');
+  } catch (e) {
+    assert(e.message === authError, 'api.profile.get uses standardized auth error');
+  }
+
+  // Backward compatibility: api facade routes to legacy methods
+  c.sendMessage = async (to, text) => ({ to, text });
+  const sendResult = await c.api.messages.sendText('u-test', 'hello');
+  assert(sendResult.to === 'u-test' && sendResult.text === 'hello', 'api.messages.sendText maps to sendMessage');
+
+  c.getMyProfile = async () => ({ mid: 'u123', displayName: 'Tester' });
+  const profile = await c.api.profile.get();
+  assert(profile.mid === 'u123', 'api.profile.get maps to getMyProfile');
+
+  c.getChats = async () => ([{ chatMid: 'c123' }]);
+  const chats = await c.api.chats.list();
+  assert(Array.isArray(chats) && chats.length === 1, 'api.chats.list maps to getChats');
+}
+
+// ============================================================
+// Test 5: Login (requires credentials)
 // ============================================================
 async function testLogin() {
   console.log(`\n${B}━━━ Test 4: Login ━━━${W}`);
@@ -170,7 +217,7 @@ async function testLogin() {
 }
 
 // ============================================================
-// Test 5: Profile (requires login)
+// Test 6: Profile (requires login)
 // ============================================================
 async function testProfile(c) {
   console.log(`\n${B}━━━ Test 5: Profile ━━━${W}`);
@@ -188,7 +235,7 @@ async function testProfile(c) {
 }
 
 // ============================================================
-// Test 6: Messages (requires login + target)
+// Test 7: Messages (requires login + target)
 // ============================================================
 async function testMessages(c) {
   console.log(`\n${B}━━━ Test 6: Messages ━━━${W}`);
@@ -222,7 +269,7 @@ async function testMessages(c) {
 }
 
 // ============================================================
-// Test 7: Listen (requires login, runs for 10 seconds)
+// Test 8: Listen (requires login, runs for 10 seconds)
 // ============================================================
 async function testListen(c) {
   console.log(`\n${B}━━━ Test 7: Listen (10 seconds) ━━━${W}`);
@@ -262,7 +309,7 @@ async function testListen(c) {
 }
 
 // ============================================================
-// Test 8: Chat Operations (requires login)
+// Test 9: Chat Operations (requires login)
 // ============================================================
 async function testChatOps(c) {
   console.log(`\n${B}━━━ Test 8: Chat Operations ━━━${W}`);
@@ -292,6 +339,7 @@ async function main() {
   await testConstructor();
   await testEvents();
   await testStorage();
+  await testApiStandardization();
 
   // Login
   let client = null;

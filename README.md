@@ -13,12 +13,12 @@ npm install lineclientbot
 ```typescript
 import { LineClient } from "lineclientbot";
 
-// Login with auth token
+// Standardized API: use line.api.*
 const line = new LineClient();
-await line.login({ authToken: "YOUR_AUTH_TOKEN" });
+await line.api.auth.login({ authToken: "YOUR_AUTH_TOKEN" });
 
 // Send a message
-await line.sendMessage("u1234567890abcdef1234567890abcdef", "Hello!");
+await line.api.messages.sendText("u1234567890abcdef1234567890abcdef", "Hello!");
 
 // Listen for messages
 line.on("message", async (msg) => {
@@ -26,7 +26,7 @@ line.on("message", async (msg) => {
     await msg.reply(`Echo: ${msg.text}`);
 });
 
-line.listen();
+line.api.listen.start();
 ```
 
 If you want the library to remember the login automatically, pass `rememberMe: true` or `rememberMe: "./my-token.txt"`.
@@ -40,7 +40,7 @@ await line.api.messages.sendText("u1234567890abcdef1234567890abcdef", "Hello!");
 const profile = await line.api.profile.get();
 ```
 
-The original top-level methods still work for compatibility, but the grouped API keeps related actions together.
+The original top-level methods (for example `line.login()` and `line.sendMessage()`) still work for compatibility, but `line.api.*` is the standardized path.
 
 ## API
 
@@ -64,13 +64,13 @@ new LineClient(options?)
 ### Login
 
 ```typescript
-// With auth token
+// With auth token (standardized path)
 const line = new LineClient();
-await line.login({ authToken: "xxx" });
+await line.api.auth.login({ authToken: "xxx" });
 
-// With email/password
+// With email/password (standardized path)
 const line2 = new LineClient();
-await line2.login({ mail: "email@example.com", pass: "password" });
+await line2.api.auth.login({ mail: "email@example.com", pass: "password" });
 
 // QR Login with event callbacks
 const qrClient = await LineClient.loginWithQR({
@@ -79,9 +79,9 @@ const qrClient = await LineClient.loginWithQR({
     onPin: (pin) => console.log("PIN:", pin),
 });
 
-// QR Login from an instance
+// QR Login from an instance (standardized path)
 const client = new LineClient();
-await client.login({ rememberMe: true });
+await client.api.auth.login({ rememberMe: true });
 ```
 
 QR login is the easiest way to get a fresh `authToken`. When `rememberMe` is enabled, the library stores the token in a text file and reuses it on later runs.
@@ -89,24 +89,24 @@ QR login is the easiest way to get a fresh `authToken`. When `rememberMe` is ena
 ### Profile
 
 ```typescript
-const profile = await line.getMyProfile();
-await line.updateMyProfile({ displayName: "New Name" });
+const profile = await line.api.profile.get();
+await line.api.profile.update({ displayName: "New Name" });
 ```
 
 ### Messages
 
 ```typescript
 // Send text
-await line.sendMessage(chatId, "Hello!");
+await line.api.messages.sendText(chatId, "Hello!");
 
 // Other message types (require full integration)
-await line.sendImage(chatId, imageBuffer);
-await line.sendVideo(chatId, videoBuffer);
-await line.sendAudio(chatId, audioBuffer);
-await line.sendFile(chatId, fileBuffer, "file.txt");
-await line.sendSticker(chatId, "stickerId");
-await line.sendFlex(chatId, "Alt text", flexJson);
-await line.sendLocation(chatId, {
+await line.api.messages.sendImage(chatId, imageBuffer);
+await line.api.messages.sendVideo(chatId, videoBuffer);
+await line.api.messages.sendAudio(chatId, audioBuffer);
+await line.api.messages.sendFile(chatId, fileBuffer, "file.txt");
+await line.api.messages.sendSticker(chatId, "stickerId");
+await line.api.messages.sendFlex(chatId, "Alt text", flexJson);
+await line.api.messages.sendLocation(chatId, {
     title: "Location",
     address: "123 Street",
     latitude: 13.7563,
@@ -117,28 +117,28 @@ await line.sendLocation(chatId, {
 ### Chat Management
 
 ```typescript
-const chats = await line.getChats();
-const chat = await line.getChat(chatMid);
-const newChat = await line.createChat({ name: "My Group", memberMids: ["mid1", "mid2"] });
-await line.inviteToChat(chatMid, ["mid1"]);
-await line.leaveChat(chatMid);
+const chats = await line.api.chats.list();
+const chat = await line.api.chats.get(chatMid);
+const newChat = await line.api.chats.create({ name: "My Group", memberMids: ["mid1", "mid2"] });
+await line.api.chats.invite(chatMid, ["mid1"]);
+await line.api.chats.leave(chatMid);
 ```
 
 ### Friends
 
 ```typescript
-const contacts = await line.getContacts();
-const user = await line.getContact(userMid);
-await line.blockContact(userMid);
-await line.unblockContact(userMid);
+const contacts = await line.api.contacts.list();
+const user = await line.api.contacts.get(userMid);
+await line.api.contacts.block(userMid);
+await line.api.contacts.unblock(userMid);
 ```
 
 ### OpenChat (Square)
 
 ```typescript
-const squares = await line.getSquares();
-await line.joinSquare(invitationUrl);
-await line.leaveSquare(squareMid);
+const squares = await line.api.squares.list();
+await line.api.squares.join(invitationUrl);
+await line.api.squares.leave(squareMid);
 ```
 
 ### Events
@@ -155,7 +155,7 @@ line.on("event", (event) => {
     console.log("Event:", event.type);
 });
 
-line.listen();
+line.api.listen.start();
 ```
 
 ### Storage
