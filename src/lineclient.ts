@@ -432,18 +432,6 @@ export class LineClient {
 		try {
 			await this.base.e2ee.getE2EESelfKeyData(this.base.profile!.mid);
 		} catch {
-			// Do not blindly overwrite existing server keys if they already exist,
-			// to avoid Letter Sealing decryption failures on other synced devices (like mobile).
-			try {
-				const registeredKeys = await this.base.talk.getE2EEPublicKeys();
-				if (registeredKeys && registeredKeys.length > 0) {
-					this.base.emit("log" as any, {
-						type: "e2ee:server_keys_exist_without_local_key",
-						data: { count: registeredKeys.length },
-					});
-					return;
-				}
-			} catch {}
 			await this.base.e2ee.registerE2EEKeyPair();
 		}
 	}

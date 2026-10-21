@@ -63,32 +63,56 @@ export class E2EE {
 				/* Do Nothing */
 			}
 		}
+
+		// Retrieve registered public keys from talk server
+		let registeredKeys: LINETypes.Pb1_C13097n4[] = [];
+		try {
+			registeredKeys = (await this.client.talk.getE2EEPublicKeys()) || [];
+		} catch (_e) {
+			/* Do Nothing */
+		}
+
+		// Look for any server-registered key that matches a stored local key
+		for (let i = 0; i < registeredKeys.length; i++) {
+			const key = registeredKeys[i];
+			const keyId = key.keyId ?? (key as unknown as { "2"?: string })[2];
+			const _keyData = await this.getE2EESelfKeyDataByKeyId(keyId);
+			if (_keyData && _keyData.privKey && _keyData.pubKey) {
+				if (mid) {
+					_keyData.mid = mid;
+				}
+				await this.saveE2EESelfKeyData(_keyData);
+				return _keyData;
+			}
+		}
+
+		// Fallback to e2eeKeys:latest only if scoped to this mid or matching a server key
 		try {
 			const latestKey = JSON.parse(
 				(await this.client.storage.get("e2eeKeys:latest")) as string,
 			);
 			if (latestKey && latestKey.privKey && latestKey.pubKey) {
-				if (mid) {
-					await this.client.storage.set(
-						"e2eeKeys:" + mid,
-						JSON.stringify(latestKey),
-					);
+				const matchesMid = latestKey.mid && mid && latestKey.mid === mid;
+				const matchesServer = registeredKeys.some(
+					(k) => String(k.keyId ?? (k as any)[2]) === String(latestKey.keyId),
+				);
+				// Accept if explicitly for this mid, or matches current server key,
+				// or when no mid tag exists and server has no keys yet (e.g. offline testing)
+				if (matchesMid || matchesServer || (!latestKey.mid && registeredKeys.length === 0)) {
+					if (mid) {
+						latestKey.mid = mid;
+						await this.client.storage.set(
+							"e2eeKeys:" + mid,
+							JSON.stringify(latestKey),
+						);
+					}
+					return latestKey;
 				}
-				return latestKey;
 			}
 		} catch (_e) {
 			/* Do Nothing */
 		}
-		const keys = await this.client.talk.getE2EEPublicKeys();
-		for (let i = 0; i < keys.length; i++) {
-			const key = keys[i];
-			const keyId = key.keyId ?? (key as unknown as { "2"?: string })[2];
-			const _keyData = await this.getE2EESelfKeyDataByKeyId(keyId);
-			if (_keyData) {
-				await this.saveE2EESelfKeyData(_keyData);
-				return _keyData;
-			}
-		}
+
 		throw new InternalError(
 			"NoE2EEKey",
 			"E2EE Key has not been saved, try register `saveE2EESelfKeyDataByKeyId` or use E2EE Login",
@@ -116,6 +140,7 @@ export class E2EE {
 	}
 	public async saveE2EESelfKeyData(value: LooseType) {
 		if (this.client.profile?.mid) {
+			value.mid = this.client.profile.mid;
 			await this.client.storage.set(
 				"e2eeKeys:" + this.client.profile.mid,
 				JSON.stringify(value),

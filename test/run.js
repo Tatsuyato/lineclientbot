@@ -196,6 +196,16 @@ async function testE2EELetterSealing() {
   const retrievedSelfKey = await e2ee.getE2EESelfKeyData('u_nonexistent_mid');
   assert(retrievedSelfKey && retrievedSelfKey.keyId === 1001, 'getE2EESelfKeyData falls back to e2eeKeys:latest');
 
+  // Test mid-scoping: if latestKey has mid: 'u_alice', bob should not adopt it
+  const scopedAliceKey = { ...fakeKey, mid: 'u_alice' };
+  await c.base.storage.set('e2eeKeys:latest', JSON.stringify(scopedAliceKey));
+  try {
+    await e2ee.getE2EESelfKeyData('u_bob');
+    assert(false, 'getE2EESelfKeyData should reject e2eeKeys:latest belonging to another mid');
+  } catch (e) {
+    assert(e.name === 'NoE2EEKey', 'getE2EESelfKeyData rejects latest key belonging to another mid');
+  }
+
   // 3. Round-trip E2EE V2 encryption and decryption between two parties
   const aliceMID = 'u_alice_test_mid_1234567890123456';
   const bobMID = 'u_bob_test_mid_123456789012345678';
