@@ -1,4 +1,5 @@
 import { BaseClient, type ClientInit, type LoginOption } from "./base/core/mod.js";
+import { byte2int } from "./base/e2ee/mod.js";
 import type { Device } from "./types/devices.js";
 import { getDeviceDetails } from "./types/devices.js";
 import { BaseStorage, MemoryStorage, FileStorage } from "./base/storage/mod.js";
@@ -431,6 +432,18 @@ export class LineClient {
 		try {
 			await this.base.e2ee.getE2EESelfKeyData(this.base.profile!.mid);
 		} catch {
+			// Do not blindly overwrite existing server keys if they already exist,
+			// to avoid Letter Sealing decryption failures on other synced devices (like mobile).
+			try {
+				const registeredKeys = await this.base.talk.getE2EEPublicKeys();
+				if (registeredKeys && registeredKeys.length > 0) {
+					this.base.emit("log" as any, {
+						type: "e2ee:server_keys_exist_without_local_key",
+						data: { count: registeredKeys.length },
+					});
+					return;
+				}
+			} catch {}
 			await this.base.e2ee.registerE2EEKeyPair();
 		}
 	}
@@ -776,18 +789,28 @@ export class LineClient {
 				const msg = await this.base.e2ee.decryptE2EEMessage(event.message);
 				this.base.emit("message" as any, await buildTalkMessage(msg));
 			} catch (error) {
-				if (error instanceof Error && error.message.includes("E2EE Key has not been saved")) {
-					try {
-						await this.ensureE2EEKeyPair();
-						const msg = await this.base.e2ee.decryptE2EEMessage(event.message);
-						this.base.emit("message" as any, await buildTalkMessage(msg));
-						return;
-					} catch (retryError) {
-						this.base.emit("log" as any, {
-							type: "listen:decrypt:retry:error",
-							data: retryError,
-						});
+				try {
+					const chunks = event.message?.chunks;
+					if (chunks && chunks.length >= 4) {
+						const chunk3 = typeof chunks[3] === "string" ? Buffer.from(chunks[3], "utf-8") : chunks[3];
+						if (chunk3 && chunk3.length > 0) {
+							const senderKeyId = byte2int(chunk3);
+							if (senderKeyId !== undefined) {
+								await this.base.storage.delete(`e2eePublicKeys:${senderKeyId}`);
+							}
+						}
 					}
+					if (error instanceof Error && error.message.includes("E2EE Key has not been saved")) {
+						await this.ensureE2EEKeyPair();
+					}
+					const msg = await this.base.e2ee.decryptE2EEMessage(event.message);
+					this.base.emit("message" as any, await buildTalkMessage(msg));
+					return;
+				} catch (retryError) {
+					this.base.emit("log" as any, {
+						type: "listen:decrypt:retry:error",
+						data: retryError,
+					});
 				}
 				this.base.emit("log" as any, {
 					type: "listen:decrypt:error",
