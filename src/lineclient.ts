@@ -124,6 +124,10 @@ export interface LineClientApi {
 		) => Promise<LINETypes.Message>;
 		sendSticker: (to: string, stickerId: string) => Promise<LINETypes.Message>;
 		sendFlex: (to: string, altText: string, flexJson: any) => Promise<LINETypes.Message>;
+		react: (
+			messageId: string | bigint | number,
+			reaction?: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number,
+		) => Promise<void>;
 		unsend: (messageId: string) => Promise<void>;
 		markRead: (chatMid: string, lastMessageId: string) => Promise<void>;
 	};
@@ -293,6 +297,10 @@ export class Message extends BaseMessage {
 		return this.channel.send(text);
 	}
 
+	async react(reaction: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number = "NICE"): Promise<void> {
+		return this.client.react(this.id, reaction);
+	}
+
 	async unsend(): Promise<void> {
 		return this.client.unsendMessage(this.id);
 	}
@@ -384,6 +392,7 @@ export class LineClient {
 				) => this.sendLocation(to, location),
 				sendSticker: (to: string, stickerId: string) => this.sendSticker(to, stickerId),
 				sendFlex: (to: string, altText: string, flexJson: any) => this.sendFlex(to, altText, flexJson),
+				react: (messageId: string | bigint | number, reaction?: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number) => this.react(messageId, reaction),
 				unsend: (messageId: string) => this.unsendMessage(messageId),
 				markRead: (chatMid: string, lastMessageId: string) => this.sendChatChecked(chatMid, lastMessageId),
 			},
@@ -576,6 +585,29 @@ export class LineClient {
 	async unsendMessage(messageId: string): Promise<void> {
 		this.ensureLoggedIn();
 		await this.base.talk.unsendMessage({ messageId });
+	}
+
+	async react(
+		messageId: string | bigint | number,
+		reaction: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number = "NICE",
+	): Promise<void> {
+		this.ensureLoggedIn();
+		const reactionTypeMap: Record<string, number> = {
+			ALL: 0,
+			UNDO: 1,
+			NICE: 2,
+			LOVE: 3,
+			FUN: 4,
+			AMAZING: 5,
+			SAD: 6,
+			OMG: 7,
+		};
+		const reactionVal = typeof reaction === "string" ? (reactionTypeMap[reaction] ?? 2) : reaction;
+		const id = typeof messageId === "string" ? BigInt(messageId) : (typeof messageId === "number" ? BigInt(messageId) : messageId);
+		await this.base.talk.react({
+			id: id as any,
+			reaction: reactionVal as any,
+		});
 	}
 
 	async sendChatChecked(chatMid: string, lastMessageId: string): Promise<void> {
