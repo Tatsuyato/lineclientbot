@@ -879,7 +879,7 @@ export class LineClient {
 						} else {
 							for await (const event of (this.base.poll as any)._listenTalkEvents({
 								signal,
-								pollingInterval: 1000,
+								pollingInterval: 150,
 							})) {
 								this.base.emit("event" as any, event);
 								if (
