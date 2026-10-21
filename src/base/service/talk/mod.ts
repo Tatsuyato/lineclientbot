@@ -98,6 +98,7 @@ export class TalkService implements BaseService {
 		location?: LINETypes.Location;
 		chunks?: string[] | Buffer[];
 		e2ee?: boolean;
+		_retryCount?: number;
 	}): Promise<LINETypes.Message> {
 		const {
 			to,
@@ -169,17 +170,51 @@ export class TalkService implements BaseService {
 				true,
 				this.requestPath,
 			);
-		} catch (error) {
-			if (
+		} catch (error: any) {
+			const retries = options._retryCount ?? 0;
+			const codeStr = String(error?.data?.code ?? error?.code ?? "");
+			const reasonStr = String(error?.data?.reason ?? error?.message ?? "");
+			const isSenderKeyError =
+				codeStr === "83" ||
+				codeStr.includes("E2EE_UPDATE_SENDER_KEY") ||
+				reasonStr.toLowerCase().includes("sender key");
+			const isReceiverKeyError =
+				codeStr === "84" ||
+				codeStr.includes("E2EE_UPDATE_RECEIVER_KEY") ||
+				reasonStr.toLowerCase().includes("receiver key");
+			const isGeneralE2eeError =
 				error instanceof InternalError &&
-				(error.data?.code.toString()).includes("E2EE") &&
-				typeof e2ee === "undefined"
-			) {
-				options.e2ee = true;
-				return this.sendMessage(options);
-			} else {
-				throw error;
+				(codeStr.includes("E2EE") || reasonStr.toLowerCase().includes("e2ee"));
+
+			if (retries < 3) {
+				if (isSenderKeyError) {
+					try {
+						await this.client.e2ee.registerE2EEKeyPair();
+					} catch (_regErr) {}
+					const nextOptions = { ...options, e2ee: true, _retryCount: retries + 1 };
+					delete nextOptions.chunks;
+					return this.sendMessage(nextOptions);
+				}
+
+				if (isReceiverKeyError) {
+					try {
+						await this.client.storage.delete(`e2eePublicKeys:${to}`);
+					} catch {}
+					const nextOptions = { ...options, e2ee: true, _retryCount: retries + 1 };
+					delete nextOptions.chunks;
+					return this.sendMessage(nextOptions);
+				}
+
+				if (isGeneralE2eeError && typeof e2ee === "undefined") {
+					return this.sendMessage({
+						...options,
+						e2ee: true,
+						_retryCount: retries + 1,
+					});
+				}
 			}
+
+			throw error;
 		}
 	}
 

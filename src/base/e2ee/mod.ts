@@ -53,23 +53,31 @@ export class E2EE {
 	}
 
 	public async getE2EESelfKeyData(mid: string): Promise<LooseType> {
-		if (mid) {
-			try {
-				const keyData = JSON.parse(
-					(await this.client.storage.get("e2eeKeys:" + mid)) as string,
-				);
-				if (keyData && keyData.privKey && keyData.pubKey) return keyData;
-			} catch (_e) {
-				/* Do Nothing */
-			}
-		}
-
 		// Retrieve registered public keys from talk server
 		let registeredKeys: LINETypes.Pb1_C13097n4[] = [];
 		try {
 			registeredKeys = (await this.client.talk.getE2EEPublicKeys()) || [];
 		} catch (_e) {
 			/* Do Nothing */
+		}
+
+		if (mid) {
+			try {
+				const keyData = JSON.parse(
+					(await this.client.storage.get("e2eeKeys:" + mid)) as string,
+				);
+				if (keyData && keyData.privKey && keyData.pubKey) {
+					// Verify this key is still present on the server if the server returned keys
+					const isServerValid = registeredKeys.length === 0 || registeredKeys.some(
+						(k) => String(k.keyId ?? (k as any)[2]) === String(keyData.keyId),
+					);
+					if (isServerValid) {
+						return keyData;
+					}
+				}
+			} catch (_e) {
+				/* Do Nothing */
+			}
 		}
 
 		// Look for any server-registered key that matches a stored local key
@@ -108,6 +116,17 @@ export class E2EE {
 					}
 					return latestKey;
 				}
+			}
+		} catch (_e) {
+			/* Do Nothing */
+		}
+
+		// If no valid key was found, automatically register a fresh key pair with the server
+		try {
+			const registered = await this.registerE2EEKeyPair();
+			if (registered) {
+				const freshKey = await this.getE2EESelfKeyDataByKeyId(registered.keyId);
+				if (freshKey) return freshKey;
 			}
 		} catch (_e) {
 			/* Do Nothing */
