@@ -759,7 +759,9 @@ export class LineClient {
 			} catch {
 				authorUser = new User(this, { id: raw.from });
 			}
-			const channel = new ChatChannel(this, raw.to);
+			const isDirectUserMessage = raw.to === this.profile?.mid || (raw.toType as any) === "USER" || (raw.toType as any) === 0;
+			const targetChatMid = isDirectUserMessage ? raw.from : raw.to;
+			const channel = new ChatChannel(this, targetChatMid);
 			return new Message({
 				client: this,
 				raw,
