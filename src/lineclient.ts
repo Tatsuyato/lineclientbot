@@ -776,6 +776,7 @@ export class LineClient {
 		});
 
 		const decryptAndEmit = async (event: any) => {
+			if (!event?.message) return;
 			try {
 				const msg = await this.base.e2ee.decryptE2EEMessage(event.message);
 				this.base.emit("message" as any, await buildTalkMessage(msg));
@@ -807,25 +808,57 @@ export class LineClient {
 					type: "listen:decrypt:error",
 					data: error,
 				});
+				// Fallback: emit the raw message so plain-text or unencrypted messages are never lost
+				try {
+					this.base.emit("message" as any, await buildTalkMessage(event.message));
+				} catch {}
 			}
 		};
 
 		if (opts.talk) {
 			(async () => {
-				if (mode === "push") {
-					const stream = this.base.poll.listenTalkEvents();
-					const reader = stream.getReader();
-					signal?.addEventListener("abort", () => {
-						try { reader.cancel(); } catch {}
-					});
+				while (!signal?.aborted) {
 					try {
-						while (true) {
-							const { done, value: event } = await reader.read();
-							if (done) break;
-							if (!event) continue;
-							this.base.emit("event" as any, event);
-							if (event.type === "SEND_MESSAGE" || event.type === "RECEIVE_MESSAGE") {
-								await decryptAndEmit(event);
+						if (mode === "push") {
+							const stream = this.base.poll.listenTalkEvents();
+							const reader = stream.getReader();
+							signal?.addEventListener("abort", () => {
+								try { reader.cancel(); } catch {}
+							});
+							try {
+								while (!signal?.aborted) {
+									const { done, value: event } = await reader.read();
+									if (done) break;
+									if (!event) continue;
+									this.base.emit("event" as any, event);
+									if (
+										event.type === "SEND_MESSAGE" ||
+										event.type === "RECEIVE_MESSAGE" ||
+										(event.type as any) === 25 ||
+										(event.type as any) === 26 ||
+										Boolean(event.message)
+									) {
+										await decryptAndEmit(event);
+									}
+								}
+							} finally {
+								reader.releaseLock();
+							}
+						} else {
+							for await (const event of (this.base.poll as any)._listenTalkEvents({
+								signal,
+								pollingInterval: 1000,
+							})) {
+								this.base.emit("event" as any, event);
+								if (
+									event.type === "SEND_MESSAGE" ||
+									event.type === "RECEIVE_MESSAGE" ||
+									(event.type as any) === 25 ||
+									(event.type as any) === 26 ||
+									Boolean(event.message)
+								) {
+									await decryptAndEmit(event);
+								}
 							}
 						}
 					} catch (error) {
@@ -833,18 +866,9 @@ export class LineClient {
 							type: "listen:talk:error",
 							data: error,
 						});
-					} finally {
-						reader.releaseLock();
 					}
-				} else {
-					for await (const event of (this.base.poll as any)._listenTalkEvents({
-						signal,
-						pollingInterval: 1000,
-					})) {
-						this.base.emit("event" as any, event);
-						if (event.type === "SEND_MESSAGE" || event.type === "RECEIVE_MESSAGE") {
-							await decryptAndEmit(event);
-						}
+					if (!signal?.aborted) {
+						await new Promise((r) => setTimeout(r, 1000));
 					}
 				}
 			})();
@@ -852,29 +876,54 @@ export class LineClient {
 
 		if (opts.square) {
 			(async () => {
-				if (mode === "push") {
-					const stream = this.base.poll.listenSquareEvents();
-					const reader = stream.getReader();
-					signal?.addEventListener("abort", () => {
-						try { reader.cancel(); } catch {}
-					});
+				while (!signal?.aborted) {
 					try {
-						while (true) {
-							const { done, value: event } = await reader.read();
-							if (done) break;
-							if (!event) continue;
-							this.base.emit("square:event" as any, event);
-							if (event.type === "NOTIFICATION_MESSAGE") {
-								const sqMsg = event.payload.notificationMessage.squareMessage;
-								const channel = new SquareChatChannel(this, event.payload.notificationMessage.squareChatMid);
-								this.base.emit(
-									"square:message" as any,
-									new SquareMessage({
-										raw: sqMsg,
-										client: this,
-										channel,
-									}),
-								);
+						if (mode === "push") {
+							const stream = this.base.poll.listenSquareEvents();
+							const reader = stream.getReader();
+							signal?.addEventListener("abort", () => {
+								try { reader.cancel(); } catch {}
+							});
+							try {
+								while (!signal?.aborted) {
+									const { done, value: event } = await reader.read();
+									if (done) break;
+									if (!event) continue;
+									this.base.emit("square:event" as any, event);
+									if (event.type === "NOTIFICATION_MESSAGE") {
+										const sqMsg = event.payload.notificationMessage.squareMessage;
+										const channel = new SquareChatChannel(this, event.payload.notificationMessage.squareChatMid);
+										this.base.emit(
+											"square:message" as any,
+											new SquareMessage({
+												raw: sqMsg,
+												client: this,
+												channel,
+											}),
+										);
+									}
+								}
+							} finally {
+								reader.releaseLock();
+							}
+						} else {
+							for await (const event of (this.base.poll as any)._listenSquareEvents({
+								signal,
+								pollingInterval: 1000,
+							})) {
+								this.base.emit("square:event" as any, event);
+								if (event.type === "NOTIFICATION_MESSAGE") {
+									const sqMsg = event.payload.notificationMessage.squareMessage;
+									const channel = new SquareChatChannel(this, event.payload.notificationMessage.squareChatMid);
+									this.base.emit(
+										"square:message" as any,
+										new SquareMessage({
+											raw: sqMsg,
+											client: this,
+											channel,
+										}),
+									);
+								}
 							}
 						}
 					} catch (error) {
@@ -882,27 +931,9 @@ export class LineClient {
 							type: "listen:square:error",
 							data: error,
 						});
-					} finally {
-						reader.releaseLock();
 					}
-				} else {
-					for await (const event of (this.base.poll as any)._listenSquareEvents({
-						signal,
-						pollingInterval: 1000,
-					})) {
-						this.base.emit("square:event" as any, event);
-						if (event.type === "NOTIFICATION_MESSAGE") {
-							const sqMsg = event.payload.notificationMessage.squareMessage;
-								const channel = new SquareChatChannel(this, event.payload.notificationMessage.squareChatMid);
-							this.base.emit(
-								"square:message" as any,
-								new SquareMessage({
-									raw: sqMsg,
-									client: this,
-									channel,
-								}),
-							);
-						}
+					if (!signal?.aborted) {
+						await new Promise((r) => setTimeout(r, 1000));
 					}
 				}
 			})();
