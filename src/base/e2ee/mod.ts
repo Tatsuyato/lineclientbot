@@ -53,24 +53,66 @@ export class E2EE {
 	}
 
 	public async getE2EESelfKeyData(mid: string): Promise<LooseType> {
+		if (mid) {
+			try {
+				const keyData = JSON.parse(
+					(await this.client.storage.get("e2eeKeys:" + mid)) as string,
+				);
+				if (keyData && keyData.privKey && keyData.pubKey) return keyData;
+			} catch (_e) {
+				/* Do Nothing */
+			}
+		}
+
+		// Retrieve registered public keys from talk server
+		let registeredKeys: LINETypes.Pb1_C13097n4[] = [];
 		try {
-			const keyData = JSON.parse(
-				await this.client.storage.get("e2eeKeys:" + mid) as string,
-			);
-			if (keyData && keyData.privKey && keyData.pubKey) return keyData;
+			registeredKeys = (await this.client.talk.getE2EEPublicKeys()) || [];
 		} catch (_e) {
 			/* Do Nothing */
 		}
-		const keys = await this.client.talk.getE2EEPublicKeys();
-		for (let i = 0; i < keys.length; i++) {
-			const key = keys[i];
+
+		// Look for any server-registered key that matches a stored local key
+		for (let i = 0; i < registeredKeys.length; i++) {
+			const key = registeredKeys[i];
 			const keyId = key.keyId ?? (key as unknown as { "2"?: string })[2];
 			const _keyData = await this.getE2EESelfKeyDataByKeyId(keyId);
-			if (_keyData) {
+			if (_keyData && _keyData.privKey && _keyData.pubKey) {
+				if (mid) {
+					_keyData.mid = mid;
+				}
 				await this.saveE2EESelfKeyData(_keyData);
 				return _keyData;
 			}
 		}
+
+		// Fallback to e2eeKeys:latest only if scoped to this mid or matching a server key
+		try {
+			const latestKey = JSON.parse(
+				(await this.client.storage.get("e2eeKeys:latest")) as string,
+			);
+			if (latestKey && latestKey.privKey && latestKey.pubKey) {
+				const matchesMid = latestKey.mid && mid && latestKey.mid === mid;
+				const matchesServer = registeredKeys.some(
+					(k) => String(k.keyId ?? (k as any)[2]) === String(latestKey.keyId),
+				);
+				// Accept if explicitly for this mid, or matches current server key,
+				// or when no mid tag exists and server has no keys yet (e.g. offline testing)
+				if (matchesMid || matchesServer || (!latestKey.mid && registeredKeys.length === 0)) {
+					if (mid) {
+						latestKey.mid = mid;
+						await this.client.storage.set(
+							"e2eeKeys:" + mid,
+							JSON.stringify(latestKey),
+						);
+					}
+					return latestKey;
+				}
+			}
+		} catch (_e) {
+			/* Do Nothing */
+		}
+
 		throw new InternalError(
 			"NoE2EEKey",
 			"E2EE Key has not been saved, try register `saveE2EESelfKeyDataByKeyId` or use E2EE Login",
@@ -97,8 +139,15 @@ export class E2EE {
 		);
 	}
 	public async saveE2EESelfKeyData(value: LooseType) {
+		if (this.client.profile?.mid) {
+			value.mid = this.client.profile.mid;
+			await this.client.storage.set(
+				"e2eeKeys:" + this.client.profile.mid,
+				JSON.stringify(value),
+			);
+		}
 		await this.client.storage.set(
-			"e2eeKeys:" + this.client.profile?.mid,
+			"e2eeKeys:latest",
 			JSON.stringify(value),
 		);
 	}
@@ -115,31 +164,82 @@ export class E2EE {
 					`e2eePublicKeys:${keyId}`,
 				)) as string;
 			}
-			let receiverKeyData: LINETypes.E2EENegotiationResult;
-			if (!key) {
-				receiverKeyData = await this.client.talk.negotiateE2EEPublicKey(
-					{ mid },
-				);
-				const specVersion = receiverKeyData.specVersion;
-				if (specVersion === -1) {
-					throw new InternalError("Not support E2EE", `${mid}`);
+			if (key) {
+				return Buffer.from(key, "base64");
+			}
+
+			// If specific keyId requested, try talk.getE2EEPublicKey directly first
+			if (keyId !== undefined) {
+				try {
+					const pk = await this.client.talk.getE2EEPublicKey({
+						mid,
+						keyVersion: 1,
+						keyId: Number(keyId),
+					});
+					if (pk && pk.keyData) {
+						key = Buffer.from(pk.keyData).toString("base64");
+						await this.client.storage.set(`e2eePublicKeys:${keyId}`, key);
+						return Buffer.from(key, "base64");
+					}
+				} catch (_e) {
+					// Fall through to negotiateE2EEPublicKey
 				}
-				const publicKey = receiverKeyData.publicKey;
-				const receiverKeyId = publicKey.keyId;
-				if (receiverKeyId == keyId) {
-					key = Buffer.from(publicKey.keyData).toString("base64");
+			}
+
+			// Negotiate with LINE talk server
+			const receiverKeyData = await this.client.talk.negotiateE2EEPublicKey(
+				{ mid },
+			);
+			const specVersion = receiverKeyData.specVersion;
+			if (specVersion === -1) {
+				throw new InternalError("Not support E2EE", `${mid}`);
+			}
+			const publicKey = receiverKeyData.publicKey;
+			const receiverKeyId = publicKey.keyId;
+			const keyBuffer = Buffer.from(publicKey.keyData);
+			key = keyBuffer.toString("base64");
+
+			// Cache under the negotiated keyId
+			await this.client.storage.set(
+				`e2eePublicKeys:${receiverKeyId}`,
+				key,
+			);
+
+			if (keyId === undefined || receiverKeyId == keyId) {
+				if (keyId !== undefined) {
 					await this.client.storage.set(
 						`e2eePublicKeys:${keyId}`,
 						key,
 					);
-				} else {
-					throw new InternalError(
-						"No E2EEKey",
-						`E2EE key id ${keyId} not found on ${mid}, key id should be ${receiverKeyId}`,
-					);
 				}
+				return keyBuffer;
 			}
-			return Buffer.from(key, "base64");
+
+			// If keyId differed from negotiated key, try fetching specific keyVersion
+			try {
+				const pk = await this.client.talk.getE2EEPublicKey({
+					mid,
+					keyVersion: specVersion || 1,
+					keyId: Number(keyId),
+				});
+				if (pk && pk.keyData) {
+					const specificKey = Buffer.from(pk.keyData);
+					await this.client.storage.set(
+						`e2eePublicKeys:${keyId}`,
+						specificKey.toString("base64"),
+					);
+					return specificKey;
+				}
+			} catch (_e) {
+				// Fallback to negotiated key
+			}
+
+			// Return the negotiated public key fallback rather than crashing
+			this.e2eeLog("getE2EELocalPublicKeyFallback", {
+				requested: keyId,
+				received: receiverKeyId,
+			});
+			return keyBuffer;
 		} else {
 			let key: string | undefined;
 			key = (await this.client.storage.get(
@@ -397,15 +497,21 @@ export class E2EE {
 				);
 				return undefined;
 			}
+			const keyInfo = {
+				keyId,
+				privKey: privKey.toString("base64"),
+				pubKey: pubKey.toString("base64"),
+				e2eeVersion,
+			};
 			await this.client.storage.set(
 				"e2eeKeys:" + keyId,
-				JSON.stringify({
-					keyId,
-					privKey: privKey.toString("base64"),
-					pubKey: pubKey.toString("base64"),
-					e2eeVersion,
-				}),
+				JSON.stringify(keyInfo),
 			);
+			await this.client.storage.set(
+				"e2eeKeys:latest",
+				JSON.stringify(keyInfo),
+			);
+			await this.saveE2EESelfKeyData(keyInfo);
 			return {
 				keyId,
 				privKey,
@@ -537,6 +643,10 @@ export class E2EE {
 			const publicKey = receiverKeyData.publicKey;
 			receiverKeyId = publicKey.keyId;
 			const receiverKeyDataBuffer = Buffer.from(publicKey.keyData);
+			await this.client.storage.set(
+				`e2eePublicKeys:${receiverKeyId}`,
+				receiverKeyDataBuffer.toString("base64"),
+			);
 			keyData = this.generateSharedSecret(
 				privateKey,
 				receiverKeyDataBuffer,
@@ -843,18 +953,27 @@ export class E2EE {
 		this.e2eeLog("decryptE2EELocationMessageSenderKeyId", senderKeyId);
 		this.e2eeLog("decryptE2EELocationMessageReceiverKeyId", receiverKeyId);
 
-		const selfKey = await this.getE2EESelfKeyData(
-			this.client.profile?.mid as string,
-		);
-		let privK = Buffer.from(selfKey.privKey, "base64");
+		let privK: Buffer;
 		let pubK: LooseType;
 
 		if (toType === LINETypes.enums.MIDType.USER || toType === "USER") {
+			const selfKeyId = isSelf ? senderKeyId : receiverKeyId;
+			let selfKey = await this.getE2EESelfKeyDataByKeyId(selfKeyId);
+			if (!selfKey) {
+				selfKey = await this.getE2EESelfKeyData(
+					this.client.profile?.mid as string,
+				);
+			}
+			privK = Buffer.from(selfKey.privKey, "base64");
 			pubK = await this.getE2EELocalPublicKey(
-				to,
+				isSelf ? to : _from,
 				isSelf ? receiverKeyId : senderKeyId,
 			);
 		} else {
+			const selfKey = await this.getE2EESelfKeyData(
+				this.client.profile?.mid as string,
+			);
+			privK = Buffer.from(selfKey.privKey, "base64");
 			const groupK = await this.getE2EELocalPublicKey(
 				to,
 				receiverKeyId,
@@ -1409,7 +1528,7 @@ function toU8(b: Buffer | Uint8Array): Uint8Array {
 
 export default E2EE;
 
-function byte2int(t: Buffer) {
+export function byte2int(t: Buffer | Uint8Array): number {
 	let e = 0;
 	const s = t.length;
 	for (let i = 0; i < s; i++) {

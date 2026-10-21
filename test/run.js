@@ -169,6 +169,93 @@ async function testApiStandardization() {
 }
 
 // ============================================================
+// Test 5: E2EE Letter Sealing & Encryption / Decryption
+// ============================================================
+async function testE2EELetterSealing() {
+  console.log(`\n${B}━━━ Test 5: E2EE Letter Sealing (Encryption & Decryption) ━━━${W}`);
+
+  const nacl = require('tweetnacl');
+  const { byte2int } = require('../dist/cjs/base/e2ee/mod.js');
+  const c = new LineClient();
+  const e2ee = c.base.e2ee;
+
+  // 1. byte2int test
+  const testNum = 6078902;
+  const numBytes = Buffer.from(e2ee.getIntBytes(testNum));
+  const decodedNum = byte2int(numBytes);
+  assert(decodedNum === testNum, 'byte2int correctly decodes 32-bit big-endian integer');
+
+  // 2. Storage fallback for e2eeKeys:latest
+  const fakeKey = {
+    keyId: 1001,
+    privKey: Buffer.from(nacl.box.keyPair().secretKey).toString('base64'),
+    pubKey: Buffer.from(nacl.box.keyPair().publicKey).toString('base64'),
+    e2eeVersion: 1
+  };
+  await c.base.storage.set('e2eeKeys:latest', JSON.stringify(fakeKey));
+  const retrievedSelfKey = await e2ee.getE2EESelfKeyData('u_nonexistent_mid');
+  assert(retrievedSelfKey && retrievedSelfKey.keyId === 1001, 'getE2EESelfKeyData falls back to e2eeKeys:latest');
+
+  // Test mid-scoping: if latestKey has mid: 'u_alice', bob should not adopt it
+  const scopedAliceKey = { ...fakeKey, mid: 'u_alice' };
+  await c.base.storage.set('e2eeKeys:latest', JSON.stringify(scopedAliceKey));
+  try {
+    await e2ee.getE2EESelfKeyData('u_bob');
+    assert(false, 'getE2EESelfKeyData should reject e2eeKeys:latest belonging to another mid');
+  } catch (e) {
+    assert(e.name === 'NoE2EEKey', 'getE2EESelfKeyData rejects latest key belonging to another mid');
+  }
+
+  // 3. Round-trip E2EE V2 encryption and decryption between two parties
+  const aliceMID = 'u_alice_test_mid_1234567890123456';
+  const bobMID = 'u_bob_test_mid_123456789012345678';
+  const alicePair = nacl.box.keyPair();
+  const bobPair = nacl.box.keyPair();
+  const aliceKeyId = 1111;
+  const bobKeyId = 2222;
+
+  // Alice computes shared secret and encrypts
+  const alicePriv = Buffer.from(alicePair.secretKey);
+  const bobPub = Buffer.from(bobPair.publicKey);
+  const aliceShared = Buffer.from(e2ee.generateSharedSecret(alicePriv, bobPub));
+
+  const secretMessage = 'Hello, this is a secure LINE Letter Sealing message!';
+  const chunks = e2ee.encryptE2EETextMessage(
+    aliceKeyId,
+    bobKeyId,
+    aliceShared,
+    2, // specVersion
+    secretMessage,
+    bobMID,
+    aliceMID
+  );
+
+  assert(Array.isArray(chunks) && chunks.length === 5, 'encryptE2EETextMessage produces 5 chunks');
+  assert(byte2int(chunks[3]) === aliceKeyId, 'Chunk[3] contains aliceKeyId');
+  assert(byte2int(chunks[4]) === bobKeyId, 'Chunk[4] contains bobKeyId');
+
+  // Bob decrypts using Bob's private key and Alice's public key
+  const bobPriv = Buffer.from(bobPair.secretKey);
+  const alicePub = Buffer.from(alicePair.publicKey);
+  const decryptedObj = e2ee.decryptE2EEMessageV2(
+    bobMID,
+    aliceMID,
+    chunks,
+    bobPriv,
+    alicePub,
+    2,
+    0
+  );
+
+  assert(decryptedObj && decryptedObj.text === secretMessage, 'decryptE2EEMessageV2 decrypts message perfectly');
+
+  // 4. getE2EELocalPublicKey cached lookup
+  await c.base.storage.set(`e2eePublicKeys:${bobKeyId}`, bobPub.toString('base64'));
+  const cachedPub = await e2ee.getE2EELocalPublicKey(bobMID, bobKeyId);
+  assert(Buffer.isBuffer(cachedPub) && cachedPub.equals(bobPub), 'getE2EELocalPublicKey retrieves cached public key');
+}
+
+// ============================================================
 // Test 5: Login (requires credentials)
 // ============================================================
 async function testLogin() {
@@ -340,6 +427,7 @@ async function main() {
   await testEvents();
   await testStorage();
   await testApiStandardization();
+  await testE2EELetterSealing();
 
   // Login
   let client = null;
