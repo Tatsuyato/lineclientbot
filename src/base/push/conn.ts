@@ -119,18 +119,23 @@ export class Conn {
 		const abort = new AbortController();
 		await new Promise<void>((resolve) => {
 			(async () => {
-				const socket = await fetchFn(`https://${host}${path}`, {
-					method: "POST",
-					headers,
-					body: bodystream.stream,
-					signal: abort.signal,
-					duplex: "half",
-				} as any);
-				if (!socket.body) {
-					throw new Error("no body");
+				try {
+					const socket = await fetchFn(`https://${host}${path}`, {
+						method: "POST",
+						headers,
+						body: bodystream.stream,
+						signal: abort.signal,
+						duplex: "half",
+					} as any);
+					if (!socket.body) {
+						throw new Error("no body");
+					}
+					this.resStream = socket.body;
+					resolve();
+				} catch (err) {
+					this.manager.log("Push fetch connection error:", err);
+					resolve();
 				}
-				this.resStream = socket.body;
-				resolve();
 			})();
 			setTimeout(resolve, 300);
 		});
@@ -161,12 +166,16 @@ export class Conn {
 				setTimeout(resolve, 500);
 			});
 			if (!this.resStream) {
-				throw new Error("no resStream");
+				return;
 			}
 		}
-		for await (const chunk of this.resStream as any) {
-			this.manager.log("readByte", chunk);
-			this.onDataReceived(chunk);
+		try {
+			for await (const chunk of this.resStream as any) {
+				this.manager.log("readByte", chunk);
+				this.onDataReceived(chunk);
+			}
+		} catch (err) {
+			this.manager.log("Push read stream reset or ended:", err);
 		}
 	}
 

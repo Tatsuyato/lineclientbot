@@ -271,6 +271,7 @@ export abstract class BaseMessage {
 	get isFlex(): boolean { return this.contentType === "FLEX" || Boolean(this.contentMetadata.FLEX_JSON); }
 	get contentType(): LINETypes.ContentType { return this.raw.contentType; }
 	get contentMetadata(): Record<string, string> { return this.raw.contentMetadata ?? {}; }
+	get relatedMessageId(): string | undefined { return this.raw.relatedMessageId; }
 }
 
 export class Message extends BaseMessage {
