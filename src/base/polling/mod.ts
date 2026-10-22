@@ -92,7 +92,7 @@ export class Polling {
 		pollingInterval?: number;
 	} = {}): AsyncGenerator<Operation, void, unknown> {
 		const { signal, onError, pollingInterval } = {
-			pollingInterval: 100,
+			pollingInterval: 1000,
 			...options,
 		};
 		while (true) {
@@ -125,14 +125,13 @@ export class Polling {
 							.lastRevision;
 				}
 				if (
-					!(response.operationResponse &&
-						response.operationResponse.operations)
+					response.operationResponse &&
+					response.operationResponse.operations
 				) {
-					continue;
-				}
-				for (const event of response.operationResponse.operations) {
-					this.sync.talk.revision = event.revision;
-					yield event;
+					for (const event of response.operationResponse.operations) {
+						this.sync.talk.revision = event.revision;
+						yield event;
+					}
 				}
 			} catch (error) {
 				if (onError) {

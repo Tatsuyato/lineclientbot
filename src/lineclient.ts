@@ -100,7 +100,8 @@ export interface ListenOptions {
 	talk?: boolean;
 	square?: boolean;
 	signal?: AbortSignal;
-	mode?: "push" | "poll";
+	mode?: "push" | "poll" | "polling";
+	pollingInterval?: number;
 }
 
 export interface LineClientApi {
@@ -879,7 +880,7 @@ export class LineClient {
 						} else {
 							for await (const event of (this.base.poll as any)._listenTalkEvents({
 								signal,
-								pollingInterval: 150,
+								pollingInterval: opts.pollingInterval ?? 1000,
 							})) {
 								this.base.emit("event" as any, event);
 								if (
