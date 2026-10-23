@@ -7,9 +7,14 @@ import type { Polling } from "./base/polling/mod.js";
 import { continueRequest } from "./base/core/mod.js";
 import type * as LINETypes from "./types/line/line_types.js";
 import type { CompactMessageResponse } from "./base/service/talk/mod.js";
+import type { TalkService } from "./base/service/talk/mod.js";
+import type { RelationService } from "./base/service/relation/mod.js";
+import { BuddyService } from "./base/service/buddy/mod.js";
+import type { E2EE } from "./base/e2ee/mod.js";
+import type { LineObs } from "./base/obs/mod.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 
 const DEFAULT_REMEMBER_PATH = "./remember-me.txt";
@@ -74,6 +79,207 @@ async function writeRememberedToken(path: string, token: string, secret?: string
 
 // ====== Public Types ======
 
+export type ReactionType =
+	| "ALL"
+	| "UNDO"
+	| "NICE"
+	| "LOVE"
+	| "FUN"
+	| "AMAZING"
+	| "SAD"
+	| "OMG"
+	| 0
+	| 1
+	| 2
+	| 3
+	| 4
+	| 5
+	| 6
+	| 7;
+
+export type MediaInput = Buffer | Blob | Uint8Array | string;
+
+export type SendTarget =
+	| string
+	| {
+			mid?: string;
+			id?: string;
+			to?: string;
+			from?: string;
+			squareChatMid?: string;
+			channel?: { mid?: string; id?: string };
+	  };
+
+export function resolveSendTarget(target: SendTarget): string {
+	if (typeof target === "string") {
+		const trimmed = target.trim();
+		if (!trimmed) {
+			throw new Error("Invalid send target: target MID cannot be empty");
+		}
+		return trimmed;
+	}
+	if (target && typeof target === "object") {
+		const mid =
+			target.mid ||
+			target.id ||
+			(target as any).squareChatMid ||
+			(target as any).channel?.mid ||
+			(target as any).channel?.id ||
+			target.to ||
+			target.from;
+		if (typeof mid === "string" && mid.trim()) {
+			return mid.trim();
+		}
+	}
+	throw new Error(`Invalid send target: unable to resolve MID from ${JSON.stringify(target)}`);
+}
+
+export async function resolveMediaBlob(
+	data: MediaInput,
+	defaultFilename?: string,
+): Promise<{ blob: Blob; filename: string }> {
+	if (typeof data === "string") {
+		if (existsSync(data)) {
+			const buf = await readFile(data);
+			const filename = defaultFilename || basename(data) || "file";
+			return { blob: new Blob([buf]), filename };
+		}
+		if (data.startsWith("data:") && data.includes(";base64,")) {
+			const base64Data = data.split(";base64,")[1];
+			const buf = Buffer.from(base64Data, "base64");
+			return { blob: new Blob([buf]), filename: defaultFilename || "file" };
+		}
+		throw new Error(`Media file not found or invalid input path: ${data}`);
+	}
+	if (data instanceof Blob) {
+		return { blob: data, filename: defaultFilename || (data as any).name || "file" };
+	}
+	return { blob: new Blob([data as any]), filename: defaultFilename || "file" };
+}
+
+export interface SendTextOptions {
+	text: string;
+	replyTo?: string;
+}
+
+export interface SendFlexOptions {
+	altText: string;
+	flex: any;
+	replyTo?: string;
+}
+
+export interface SendImageOptions {
+	image: MediaInput;
+	replyTo?: string;
+}
+
+export interface SendVideoOptions {
+	video: MediaInput;
+	replyTo?: string;
+}
+
+export interface SendAudioOptions {
+	audio: MediaInput;
+	replyTo?: string;
+}
+
+export interface SendFileOptions {
+	file: MediaInput;
+	filename?: string;
+	replyTo?: string;
+}
+
+export interface SendStickerOptions {
+	sticker: string | { stickerId: string; packageId?: string; version?: string };
+	replyTo?: string;
+}
+
+export interface SendLocationOptions {
+	location: { title: string; address?: string; latitude: number; longitude: number };
+	replyTo?: string;
+}
+
+export interface TextPayload {
+	text: string;
+	replyTo?: string;
+}
+
+export interface FlexPayload {
+	altText?: string;
+	flex: any;
+	replyTo?: string;
+}
+
+export interface ImagePayload {
+	image: MediaInput;
+	replyTo?: string;
+}
+
+export interface VideoPayload {
+	video: MediaInput;
+	replyTo?: string;
+}
+
+export interface AudioPayload {
+	audio: MediaInput;
+	replyTo?: string;
+}
+
+export interface FilePayload {
+	file: MediaInput;
+	filename?: string;
+	replyTo?: string;
+}
+
+export interface StickerPayload {
+	sticker: string | { stickerId: string; packageId?: string; version?: string };
+	replyTo?: string;
+}
+
+export interface LocationPayload {
+	location: { title: string; address?: string; latitude: number; longitude: number };
+	replyTo?: string;
+}
+
+export type MessagePayload =
+	| string
+	| TextPayload
+	| FlexPayload
+	| ImagePayload
+	| VideoPayload
+	| AudioPayload
+	| FilePayload
+	| StickerPayload
+	| LocationPayload
+	| {
+			text?: string;
+			altText?: string;
+			flex?: any;
+			image?: MediaInput;
+			video?: MediaInput;
+			audio?: MediaInput;
+			file?: MediaInput;
+			filename?: string;
+			sticker?: string | { stickerId: string; packageId?: string; version?: string };
+			location?: { title: string; address?: string; latitude: number; longitude: number };
+			replyTo?: string;
+	  };
+
+export interface AddFriendOptions {
+	mid?: string;
+	userId?: string;
+	searchId?: string;
+	phone?: string;
+	reference?: string;
+}
+
+export interface FindContactOptions {
+	searchId?: string;
+	userId?: string;
+	phone?: string;
+	mid?: string;
+}
+
 export interface LineClientOptions {
 	mail?: string;
 	pass?: string;
@@ -89,10 +295,27 @@ export interface LineClientOptions {
 }
 
 export type ClientEvents = {
+	/** Emitted when a new message is received in 1-on-1 or group chat */
 	message: (message: Message) => void;
+	/** Emitted for all raw Talk operations */
 	event: (event: LINETypes.Operation) => void;
+	/** Emitted when an OpenChat / Square message is received */
 	"square:message": (message: SquareMessage) => void;
+	/** Emitted for all raw Square events */
 	"square:event": (event: LINETypes.SquareEvent) => void;
+	/** Emitted when a QR login URL is generated */
+	qrcall: (url: string) => void;
+	/** Emitted when a PIN is required during QR login */
+	pincall: (pin: string) => void;
+	/** Emitted when the auth token is updated */
+	"update:authtoken": (token: string) => void;
+	/** Emitted when client is ready after login */
+	ready: (profile: LINETypes.Profile) => void;
+	/** Emitted when client is gracefully stopped or destroyed */
+	close: () => void;
+	/** Emitted on errors */
+	error: (error: Error | unknown) => void;
+	/** Emitted for internal debug logs */
 	log: (data: { type: string; data: any }) => void;
 };
 
@@ -106,32 +329,13 @@ export interface ListenOptions {
 
 export interface LineClientApi {
 	auth: {
-		login: (options?: LineClientOptions) => Promise<LINETypes.Profile>;
+		login: (options?: string | LineClientOptions) => Promise<LINETypes.Profile>;
 	};
 	profile: {
 		get: () => Promise<LINETypes.Profile>;
 		update: (update: { displayName?: string; statusMessage?: string }) => Promise<void>;
 	};
-	messages: {
-		sendText: (to: string, text: string) => Promise<LINETypes.Message>;
-		sendCompact: (to: string, text: string) => Promise<CompactMessageResponse>;
-		sendImage: (to: string, data: Buffer | Blob) => Promise<LINETypes.Message>;
-		sendVideo: (to: string, data: Buffer | Blob) => Promise<LINETypes.Message>;
-		sendAudio: (to: string, data: Buffer | Blob) => Promise<LINETypes.Message>;
-		sendFile: (to: string, data: Buffer | Blob, filename: string) => Promise<LINETypes.Message>;
-		sendLocation: (
-			to: string,
-			location: { title: string; address: string; latitude: number; longitude: number },
-		) => Promise<LINETypes.Message>;
-		sendSticker: (to: string, stickerId: string) => Promise<LINETypes.Message>;
-		sendFlex: (to: string, altText: string, flexJson: any) => Promise<LINETypes.Message>;
-		react: (
-			messageId: string | bigint | number,
-			reaction?: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number,
-		) => Promise<void>;
-		unsend: (messageId: string) => Promise<void>;
-		markRead: (chatMid: string, lastMessageId: string) => Promise<void>;
-	};
+	messages: MessageManager;
 	chats: {
 		list: () => Promise<LINETypes.Chat[]>;
 		get: (chatMid: string) => Promise<LINETypes.Chat>;
@@ -143,22 +347,190 @@ export interface LineClientApi {
 	contacts: {
 		list: () => Promise<LINETypes.ContactEntry[]>;
 		get: (userMid: string) => Promise<LINETypes.Contact>;
+		add: (options: string | AddFriendOptions) => Promise<any>;
+		find: (options: string | FindContactOptions) => Promise<LINETypes.Contact>;
 		block: (userMid: string) => Promise<void>;
 		unblock: (userMid: string) => Promise<void>;
 	};
-	squares: {
-		list: () => Promise<LINETypes.Square[]>;
-		send: (squareChatMid: string, text: string) => Promise<LINETypes.SendMessageResponse>;
-		join: (invitationUrl: string) => Promise<LINETypes.JoinSquareResponse>;
-		leave: (squareMid: string) => Promise<void>;
-	};
+	squares: SquareManager;
 	listen: {
 		start: (options?: ListenOptions) => void;
 	};
 	system: {
 		getServerTime: () => Promise<number>;
 		noop: () => Promise<void>;
+		close: () => Promise<void>;
+		destroy: () => Promise<void>;
 	};
+}
+
+// ====== Modern Domain Managers ======
+
+export class MessageManager {
+	constructor(private readonly client: LineClient) {}
+
+	async send(to: SendTarget, content: MessagePayload): Promise<LINETypes.Message> {
+		return this.client.send(to, content);
+	}
+
+	async sendText(to: SendTarget, text: string, replyTo?: string): Promise<LINETypes.Message> {
+		return this.client.sendMessage(to, text, replyTo);
+	}
+
+	async sendFlex(to: SendTarget, altText: string, flexJson: any, replyTo?: string): Promise<LINETypes.Message> {
+		return this.client.sendFlex(to, altText, flexJson, replyTo);
+	}
+
+	async sendImage(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
+		return this.client.sendImage(to, data);
+	}
+
+	async sendVideo(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
+		return this.client.sendVideo(to, data);
+	}
+
+	async sendAudio(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
+		return this.client.sendAudio(to, data);
+	}
+
+	async sendFile(to: SendTarget, data: MediaInput, filename?: string): Promise<LINETypes.Message> {
+		return this.client.sendFile(to, data, filename);
+	}
+
+	async sendLocation(
+		to: SendTarget,
+		location: { title: string; address?: string; latitude: number; longitude: number },
+		replyTo?: string,
+	): Promise<LINETypes.Message> {
+		return this.client.sendLocation(to, location, replyTo);
+	}
+
+	async sendSticker(
+		to: SendTarget,
+		stickerId: string,
+		packageId?: string,
+		version?: string,
+		replyTo?: string,
+	): Promise<LINETypes.Message> {
+		return this.client.sendSticker(to, stickerId, packageId, version, replyTo);
+	}
+
+	async sendCompact(to: SendTarget, text: string): Promise<CompactMessageResponse> {
+		return this.client.sendCompactMessage(to, text);
+	}
+
+	async reply(
+		toOrMessage: SendTarget | Message | { channel?: { id?: string; mid?: string }; to?: string; id: string },
+		messageIdOrContent: string | MessagePayload,
+		maybeContent?: MessagePayload,
+	): Promise<LINETypes.Message> {
+		return this.client.reply(toOrMessage as any, messageIdOrContent as any, maybeContent);
+	}
+
+	async react(
+		messageId: string | bigint | number,
+		reaction: ReactionType = "NICE",
+	): Promise<void> {
+		return this.client.react(messageId, reaction);
+	}
+
+	async unsend(messageId: string): Promise<void> {
+		return this.client.unsendMessage(messageId);
+	}
+
+	async read(
+		toOrMessage: SendTarget | Message | { channel?: { id?: string; mid?: string }; to?: string; id?: string },
+		lastMessageId?: string,
+	): Promise<void> {
+		return this.client.read(toOrMessage as any, lastMessageId);
+	}
+
+	async markRead(
+		toOrMessage: SendTarget | Message | { channel?: { id?: string; mid?: string }; to?: string; id?: string },
+		lastMessageId?: string,
+	): Promise<void> {
+		return this.read(toOrMessage, lastMessageId);
+	}
+}
+
+export class ChatManager {
+	constructor(private readonly client: LineClient) {}
+
+	async list(): Promise<ChatChannel[]> {
+		const rawChats = await this.client.getChats();
+		return rawChats.map((raw) => new ChatChannel(this.client, raw.chatMid, raw));
+	}
+
+	async get(chatMid: string): Promise<ChatChannel> {
+		const raw = await this.client.getChat(chatMid);
+		return new ChatChannel(this.client, chatMid, raw);
+	}
+
+	async create(options: { name?: string; memberMids?: string[] }): Promise<LINETypes.CreateChatResponse> {
+		return this.client.createChat(options);
+	}
+
+	async invite(chatMid: string, memberMids: string[]): Promise<void> {
+		return this.client.inviteToChat(chatMid, memberMids);
+	}
+
+	async leave(chatMid: string): Promise<void> {
+		return this.client.leaveChat(chatMid);
+	}
+
+	async listIds(): Promise<LINETypes.GetAllChatMidsResponse> {
+		return this.client.getAllChatMids();
+	}
+}
+
+export class ContactManager {
+	constructor(private readonly client: LineClient) {}
+
+	async list(): Promise<User[]> {
+		const rawEntries = await this.client.getContacts();
+		return rawEntries.map((e: any) => new User(this.client, e.contact || e));
+	}
+
+	async get(userMid: string): Promise<User> {
+		const raw = await this.client.getContact(userMid);
+		return new User(this.client, raw);
+	}
+
+	async add(options: string | AddFriendOptions): Promise<any> {
+		return this.client.addFriend(options);
+	}
+
+	async find(options: string | FindContactOptions): Promise<LINETypes.Contact> {
+		return this.client.findContact(options);
+	}
+
+	async block(userMid: string): Promise<void> {
+		return this.client.blockContact(userMid);
+	}
+
+	async unblock(userMid: string): Promise<void> {
+		return this.client.unblockContact(userMid);
+	}
+}
+
+export class SquareManager {
+	constructor(private readonly client: LineClient) {}
+
+	async list(): Promise<LINETypes.Square[]> {
+		return this.client.getSquares();
+	}
+
+	async send(squareChatMid: string, text: string): Promise<LINETypes.SendMessageResponse> {
+		return this.client.sendSquareMessage(squareChatMid, text);
+	}
+
+	async join(invitationUrl: string): Promise<LINETypes.JoinSquareResponse> {
+		return this.client.joinSquare(invitationUrl);
+	}
+
+	async leave(squareMid: string): Promise<void> {
+		return this.client.leaveSquare(squareMid);
+	}
 }
 
 // ====== Public Classes (discord.js inspired) ======
@@ -169,6 +541,7 @@ export class User {
 	readonly displayName: string;
 	readonly statusMessage?: string;
 	readonly picturePath?: string;
+	readonly raw: any;
 
 	constructor(client: LineClient, raw: any) {
 		this.client = client;
@@ -176,14 +549,27 @@ export class User {
 		this.displayName = raw.displayName || this.id;
 		this.statusMessage = raw.statusMessage;
 		this.picturePath = raw.picturePath;
+		this.raw = raw;
 	}
 
 	get avatarUrl(): string {
 		return this.picturePath ? `https://profile.line-cdn.net/${this.picturePath}` : "";
 	}
 
-	async send(text: string): Promise<LINETypes.Message> {
-		return this.client.sendMessage(this.id, text);
+	async send(content: MessagePayload): Promise<LINETypes.Message> {
+		return this.client.send(this.id, content);
+	}
+
+	async addFriend(): Promise<any> {
+		return this.client.addFriend(this.id);
+	}
+
+	async block(): Promise<void> {
+		return this.client.blockContact(this.id);
+	}
+
+	async unblock(): Promise<void> {
+		return this.client.unblockContact(this.id);
 	}
 }
 
@@ -196,7 +582,7 @@ export abstract class BaseChannel {
 		this.id = id;
 	}
 
-	abstract send(text: string): Promise<any>;
+	abstract send(content: any): Promise<any>;
 }
 
 export class ChatChannel extends BaseChannel {
@@ -209,8 +595,8 @@ export class ChatChannel extends BaseChannel {
 		this.name = raw?.chatName;
 	}
 
-	async send(text: string): Promise<LINETypes.Message> {
-		return this.client.sendMessage(this.id, text);
+	async send(content: MessagePayload): Promise<LINETypes.Message> {
+		return this.client.send(this.id, content);
 	}
 
 	async invite(memberMids: string[]): Promise<void> {
@@ -254,7 +640,7 @@ export abstract class BaseMessage {
 		this.raw = raw;
 	}
 
-	abstract reply(text: string): Promise<any>;
+	abstract reply(content: any): Promise<any>;
 
 	get text(): string { return this.content; }
 	get altText(): string { return this.contentMetadata.ALT_TEXT ?? ""; }
@@ -294,11 +680,15 @@ export class Message extends BaseMessage {
 	/** @deprecated Use message.channel.id instead */
 	get to(): string { return this.channel.id; }
 
-	async reply(text: string): Promise<LINETypes.Message> {
-		return this.channel.send(text);
+	async reply(content: MessagePayload): Promise<LINETypes.Message> {
+		return this.client.reply(this.channel.id, this.id, content);
 	}
 
-	async react(reaction: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number = "NICE"): Promise<void> {
+	async send(content: MessagePayload): Promise<LINETypes.Message> {
+		return this.channel.send(content);
+	}
+
+	async react(reaction: ReactionType = "NICE"): Promise<void> {
 		return this.client.react(this.id, reaction);
 	}
 
@@ -336,10 +726,16 @@ export class SquareMessage extends BaseMessage {
 export class LineClient {
 	readonly base: BaseClient;
 	readonly api: LineClientApi;
+	readonly messages: MessageManager;
+	readonly chats: ChatManager;
+	readonly contacts: ContactManager;
+	readonly squares: SquareManager;
 	private _storage: BaseStorage;
 	private _loggedIn: boolean = false;
 	private readonly _rememberPath?: string;
 	private readonly _rememberMeSecret?: string;
+	private _abortController: AbortController = new AbortController();
+	private _destroyed: boolean = false;
 
 	constructor(options: LineClientOptions = {}) {
 		const device = options.device || "DESKTOPWIN";
@@ -367,36 +763,25 @@ export class LineClient {
 		});
 
 		if (this._rememberPath) {
-			this.base.on("update:authtoken", (token: string) => {
+			this.base.on("update:authtoken" as any, (token: string) => {
 				void writeRememberedToken(this._rememberPath!, token, this._rememberMeSecret).catch(() => {});
 			});
 		}
 
+		this.messages = new MessageManager(this);
+		this.chats = new ChatManager(this);
+		this.contacts = new ContactManager(this);
+		this.squares = new SquareManager(this);
+
 		this.api = {
 			auth: {
-				login: (options?: LineClientOptions) => this.login(options),
+				login: (options?: string | LineClientOptions) => this.login(options),
 			},
 			profile: {
 				get: () => this.getMyProfile(),
 				update: (update: { displayName?: string; statusMessage?: string }) => this.updateMyProfile(update),
 			},
-			messages: {
-				sendText: (to: string, text: string) => this.sendMessage(to, text),
-				sendCompact: (to: string, text: string) => this.sendCompactMessage(to, text),
-				sendImage: (to: string, data: Buffer | Blob) => this.sendImage(to, data),
-				sendVideo: (to: string, data: Buffer | Blob) => this.sendVideo(to, data),
-				sendAudio: (to: string, data: Buffer | Blob) => this.sendAudio(to, data),
-				sendFile: (to: string, data: Buffer | Blob, filename: string) => this.sendFile(to, data, filename),
-				sendLocation: (
-					to: string,
-					location: { title: string; address: string; latitude: number; longitude: number },
-				) => this.sendLocation(to, location),
-				sendSticker: (to: string, stickerId: string) => this.sendSticker(to, stickerId),
-				sendFlex: (to: string, altText: string, flexJson: any) => this.sendFlex(to, altText, flexJson),
-				react: (messageId: string | bigint | number, reaction?: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number) => this.react(messageId, reaction),
-				unsend: (messageId: string) => this.unsendMessage(messageId),
-				markRead: (chatMid: string, lastMessageId: string) => this.sendChatChecked(chatMid, lastMessageId),
-			},
+			messages: this.messages,
 			chats: {
 				list: () => this.getChats(),
 				get: (chatMid: string) => this.getChat(chatMid),
@@ -408,21 +793,20 @@ export class LineClient {
 			contacts: {
 				list: () => this.getContacts(),
 				get: (userMid: string) => this.getContact(userMid),
+				add: (options: string | AddFriendOptions) => this.addFriend(options),
+				find: (options: string | FindContactOptions) => this.findContact(options),
 				block: (userMid: string) => this.blockContact(userMid),
 				unblock: (userMid: string) => this.unblockContact(userMid),
 			},
-			squares: {
-				list: () => this.getSquares(),
-				send: (squareChatMid: string, text: string) => this.sendSquareMessage(squareChatMid, text),
-				join: (invitationUrl: string) => this.joinSquare(invitationUrl),
-				leave: (squareMid: string) => this.leaveSquare(squareMid),
-			},
+			squares: this.squares,
 			listen: {
 				start: (options?: ListenOptions) => this.listen(options ?? { talk: true, square: true, mode: "push" }),
 			},
 			system: {
 				getServerTime: () => this.getServerTime(),
 				noop: () => this.noop(),
+				close: () => this.close(),
+				destroy: () => this.destroy(),
 			},
 		};
 	}
@@ -435,7 +819,45 @@ export class LineClient {
 	get authToken(): string | undefined { return this.base.authToken; }
 	get profile(): LINETypes.Profile | undefined { return this.base.profile; }
 	get isLoggedIn(): boolean { return this._loggedIn; }
+	get isDestroyed(): boolean { return this._destroyed; }
 	get poll(): Polling { return this.base.poll; }
+	get talk(): TalkService { return this.base.talk; }
+	get relation(): RelationService { return this.base.relation; }
+	private _buddy?: BuddyService;
+	get buddy(): BuddyService {
+		if (!this._buddy) {
+			this._buddy = new BuddyService(this.base);
+		}
+		return this._buddy;
+	}
+	get e2ee(): E2EE { return this.base.e2ee; }
+	get obs(): LineObs { return this.base.obs; }
+
+	// ====== Lifecycle & Teardown ======
+
+	async close(): Promise<void> {
+		if (this._destroyed) return;
+		this._destroyed = true;
+		this._loggedIn = false;
+
+		try {
+			this._abortController.abort();
+		} catch {}
+
+		try {
+			this.base.push?.opStream?.close();
+		} catch {}
+		try {
+			this.base.push?.sqStream?.close();
+		} catch {}
+
+		this.emit("close");
+		this.removeAllListeners();
+	}
+
+	async destroy(): Promise<void> {
+		return this.close();
+	}
 
 	// ====== Login ======
 
@@ -447,7 +869,13 @@ export class LineClient {
 		}
 	}
 
-	async login(options?: LineClientOptions): Promise<LINETypes.Profile> {
+	async login(authTokenOrOptions?: string | LineClientOptions): Promise<LINETypes.Profile> {
+		this._abortController = new AbortController();
+		this._destroyed = false;
+		const options: LineClientOptions =
+			typeof authTokenOrOptions === "string"
+				? { authToken: authTokenOrOptions }
+				: (authTokenOrOptions ?? {});
 		const secret = options?.rememberMeSecret ?? this._rememberMeSecret;
 		if (options?.authToken) {
 			await this.base.loginProcess.login({ authToken: options.authToken });
@@ -456,6 +884,7 @@ export class LineClient {
 			if (this._rememberPath && this.base.authToken) {
 				await writeRememberedToken(this._rememberPath, this.base.authToken, secret);
 			}
+			this.emit("ready", this.base.profile!);
 			return this.base.profile!;
 		}
 
@@ -467,6 +896,7 @@ export class LineClient {
 					await this.base.loginProcess.login({ authToken: rememberedToken });
 					this._loggedIn = true;
 					await this.ensureE2EEKeyPair();
+					this.emit("ready", this.base.profile!);
 					return this.base.profile!;
 				} catch {
 					// Fall through to the explicit login flow.
@@ -489,6 +919,7 @@ export class LineClient {
 		if (rememberPath && this.base.authToken) {
 			await writeRememberedToken(rememberPath, this.base.authToken, secret);
 		}
+		this.emit("ready", this.base.profile!);
 		return this.base.profile!;
 	}
 
@@ -509,6 +940,7 @@ export class LineClient {
 			if (rememberPath && client.base.authToken) {
 				await writeRememberedToken(rememberPath, client.base.authToken, secret);
 			}
+			client.emit("ready", client.base.profile!);
 			return client;
 		}
 
@@ -519,6 +951,7 @@ export class LineClient {
 					await client.base.loginProcess.login({ authToken: rememberedToken });
 					client._loggedIn = true;
 					await client.ensureE2EEKeyPair();
+					client.emit("ready", client.base.profile!);
 					return client;
 				} catch {
 					// Fall through to QR login.
@@ -539,6 +972,7 @@ export class LineClient {
 		if (rememberPath && client.base.authToken) {
 			await writeRememberedToken(rememberPath, client.base.authToken, secret);
 		}
+		client.emit("ready", client.base.profile!);
 		return client;
 	}
 
@@ -573,14 +1007,98 @@ export class LineClient {
 
 	// ====== Messages ======
 
-	async sendMessage(to: string, text: string): Promise<LINETypes.Message> {
-		this.ensureLoggedIn();
-		return await this.base.talk.sendMessage({ to, text });
+	async send(to: SendTarget, content: MessagePayload): Promise<LINETypes.Message> {
+		const targetMid = resolveSendTarget(to);
+		if (typeof content === "string") {
+			return this.sendMessage(targetMid, content);
+		}
+		if ("flex" in content && content.flex) {
+			return this.sendFlex(targetMid, content.altText || "Flex Message", content.flex, content.replyTo);
+		}
+		if ("image" in content && content.image) {
+			return this.sendImage(targetMid, content.image);
+		}
+		if ("video" in content && content.video) {
+			return this.sendVideo(targetMid, content.video);
+		}
+		if ("audio" in content && content.audio) {
+			return this.sendAudio(targetMid, content.audio);
+		}
+		if ("file" in content && content.file) {
+			return this.sendFile(targetMid, content.file, content.filename);
+		}
+		if ("sticker" in content && content.sticker) {
+			if (typeof content.sticker === "string") {
+				return this.sendSticker(targetMid, content.sticker, "1", "100", content.replyTo);
+			}
+			return this.sendSticker(
+				targetMid,
+				content.sticker.stickerId,
+				content.sticker.packageId || "1",
+				content.sticker.version || "100",
+				content.replyTo,
+			);
+		}
+		if ("location" in content && content.location) {
+			return this.sendLocation(targetMid, content.location, content.replyTo);
+		}
+		if ("text" in content && content.text) {
+			return this.sendMessage(targetMid, content.text, content.replyTo);
+		}
+		throw new Error("Invalid message payload: no recognized content (text, flex, image, sticker, etc.)");
 	}
 
-	async sendCompactMessage(to: string, text: string): Promise<CompactMessageResponse> {
+	async reply(
+		toOrMessage: SendTarget | Message | { channel?: { id?: string; mid?: string }; to?: string; id: string },
+		messageIdOrContent: string | MessagePayload,
+		maybeContent?: MessagePayload,
+	): Promise<LINETypes.Message> {
+		let targetTo: SendTarget;
+		let replyMessageId: string;
+		let payload: MessagePayload;
+
+		if (typeof toOrMessage === "object" && toOrMessage !== null && "id" in toOrMessage && (toOrMessage as any).id) {
+			targetTo =
+				(toOrMessage as any).channel?.id ||
+				(toOrMessage as any).channel?.mid ||
+				(toOrMessage as any).to ||
+				(toOrMessage as any).from ||
+				"";
+			replyMessageId = (toOrMessage as any).id;
+			payload = messageIdOrContent as MessagePayload;
+		} else if (maybeContent !== undefined) {
+			targetTo = toOrMessage as SendTarget;
+			replyMessageId = messageIdOrContent as string;
+			payload = maybeContent;
+		} else {
+			throw new Error("reply requires both target chat and message ID (e.g. client.reply(message, content) or client.reply(chatId, messageId, content))");
+		}
+
+		const targetMid = resolveSendTarget(targetTo);
+
+		if (typeof payload === "string") {
+			return this.sendMessage(targetMid, payload, replyMessageId);
+		}
+		return this.send(targetMid, {
+			...payload,
+			replyTo: replyMessageId,
+		});
+	}
+
+	async sendMessage(to: SendTarget, text: string, replyTo?: string): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
-		return await this.base.talk.sendCompactMessage({ to, text });
+		const targetMid = resolveSendTarget(to);
+		return await this.base.talk.sendMessage({
+			to: targetMid,
+			text,
+			...(replyTo ? { relatedMessageId: replyTo } : {}),
+		});
+	}
+
+	async sendCompactMessage(to: SendTarget, text: string): Promise<CompactMessageResponse> {
+		this.ensureLoggedIn();
+		const targetMid = resolveSendTarget(to);
+		return await this.base.talk.sendCompactMessage({ to: targetMid, text });
 	}
 
 	async unsendMessage(messageId: string): Promise<void> {
@@ -590,7 +1108,7 @@ export class LineClient {
 
 	async react(
 		messageId: string | bigint | number,
-		reaction: "NICE" | "LOVE" | "FUN" | "AMAZING" | "SAD" | "OMG" | number = "NICE",
+		reaction: ReactionType = "NICE",
 	): Promise<void> {
 		this.ensureLoggedIn();
 		const reactionTypeMap: Record<string, number> = {
@@ -611,65 +1129,113 @@ export class LineClient {
 		});
 	}
 
-	async sendChatChecked(chatMid: string, lastMessageId: string): Promise<void> {
+	async sendChatChecked(chatMid: SendTarget, lastMessageId: string): Promise<void> {
 		this.ensureLoggedIn();
-		await this.base.talk.sendChatChecked({ chatMid, lastMessageId });
+		const targetMid = resolveSendTarget(chatMid);
+		await this.base.talk.sendChatChecked({ chatMid: targetMid, lastMessageId });
 	}
 
-	async sendImage(to: string, data: Buffer | Blob): Promise<LINETypes.Message> {
-		this.ensureLoggedIn();
-		const blob = data instanceof Blob ? data : new Blob([data as any]);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "image", to });
+	async read(
+		toOrMessage: SendTarget | Message | { channel?: { id?: string; mid?: string }; to?: string; id?: string },
+		lastMessageId?: string,
+	): Promise<void> {
+		if (
+			typeof toOrMessage === "object" &&
+			toOrMessage !== null &&
+			"id" in toOrMessage &&
+			(toOrMessage as any).id &&
+			!lastMessageId
+		) {
+			const chatMid =
+				(toOrMessage as any).channel?.id ||
+				(toOrMessage as any).channel?.mid ||
+				(toOrMessage as any).to ||
+				(toOrMessage as any).from;
+			return this.sendChatChecked(resolveSendTarget(chatMid), (toOrMessage as any).id);
+		}
+		const chatMid = resolveSendTarget(toOrMessage as SendTarget);
+		if (!lastMessageId) {
+			throw new Error("read requires a messageId when passing chat target (e.g. client.read(chatMid, messageId) or client.read(message))");
+		}
+		return this.sendChatChecked(chatMid, lastMessageId);
 	}
 
-	async sendVideo(to: string, data: Buffer | Blob): Promise<LINETypes.Message> {
+	async sendImage(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
-		const blob = data instanceof Blob ? data : new Blob([data as any]);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "video", to });
+		const targetMid = resolveSendTarget(to);
+		const { blob } = await resolveMediaBlob(data);
+		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "image", to: targetMid });
 	}
 
-	async sendAudio(to: string, data: Buffer | Blob): Promise<LINETypes.Message> {
+	async sendVideo(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
-		const blob = data instanceof Blob ? data : new Blob([data as any]);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "audio", to });
+		const targetMid = resolveSendTarget(to);
+		const { blob } = await resolveMediaBlob(data);
+		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "video", to: targetMid });
 	}
 
-	async sendFile(to: string, data: Buffer | Blob, filename: string): Promise<LINETypes.Message> {
+	async sendAudio(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
-		const blob = data instanceof Blob ? data : new Blob([data as any]);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "file", to, filename });
+		const targetMid = resolveSendTarget(to);
+		const { blob } = await resolveMediaBlob(data);
+		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "audio", to: targetMid });
+	}
+
+	async sendFile(to: SendTarget, data: MediaInput, filename?: string): Promise<LINETypes.Message> {
+		this.ensureLoggedIn();
+		const targetMid = resolveSendTarget(to);
+		const resolved = await resolveMediaBlob(data, filename);
+		return await this.base.obs.uploadMediaByE2EE({
+			data: resolved.blob,
+			oType: "file",
+			to: targetMid,
+			filename: filename || resolved.filename,
+		});
 	}
 
 	async sendLocation(
-		to: string,
-		location: { title: string; address: string; latitude: number; longitude: number },
+		to: SendTarget,
+		location: { title: string; address?: string; latitude: number; longitude: number },
+		replyTo?: string,
 	): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
+		const targetMid = resolveSendTarget(to);
 		return await this.base.talk.sendMessage({
-			to,
+			to: targetMid,
 			contentType: "LOCATION",
 			location: location as any,
+			...(replyTo ? { relatedMessageId: replyTo } : {}),
 		});
 	}
 
-	async sendSticker(to: string, stickerId: string): Promise<LINETypes.Message> {
+	async sendSticker(
+		to: SendTarget,
+		stickerId: string,
+		packageId: string = "1",
+		version: string = "100",
+		replyTo?: string,
+	): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
+		const targetMid = resolveSendTarget(to);
 		return await this.base.talk.sendMessage({
-			to,
+			to: targetMid,
 			contentType: "STICKER",
-			contentMetadata: { STKID: stickerId, STKVER: "100", STKPKGID: "1" },
+			contentMetadata: { STKID: stickerId, STKVER: version, STKPKGID: packageId },
+			...(replyTo ? { relatedMessageId: replyTo } : {}),
 		});
 	}
 
-	async sendFlex(to: string, altText: string, flexJson: any): Promise<LINETypes.Message> {
+	async sendFlex(to: SendTarget, altText: string, flexJson: any, replyTo?: string): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
+		const targetMid = resolveSendTarget(to);
 		return await this.base.talk.sendMessage({
-			to,
+			to: targetMid,
 			contentType: "FLEX",
 			contentMetadata: {
 				ALTTEXT: altText,
-				FLEXCONTAINER: JSON.stringify(flexJson),
+				FLEXCONTAINER: typeof flexJson === "string" ? flexJson : JSON.stringify(flexJson),
 			},
+			...(replyTo ? { relatedMessageId: replyTo } : {}),
 		});
 	}
 
@@ -727,6 +1293,60 @@ export class LineClient {
 
 	// ====== Friends ======
 
+	async addFriend(options: string | AddFriendOptions): Promise<any> {
+		this.ensureLoggedIn();
+		if (typeof options === "string") {
+			const trimmed = options.trim();
+			if (trimmed.startsWith("u") && trimmed.length === 33) {
+				return await this.relation.addFriendByMid({ mid: trimmed });
+			}
+			return await this.relation.addFriendByUserId({ userId: trimmed });
+		}
+		if (options.mid) {
+			return await this.relation.addFriendByMid({
+				mid: options.mid,
+				reference: options.reference,
+			});
+		}
+		if (options.userId || options.searchId) {
+			return await this.relation.addFriendByUserId({
+				userId: options.userId || options.searchId!,
+			});
+		}
+		if (options.phone) {
+			return await this.relation.addFriendByPhone({
+				phone: options.phone,
+			});
+		}
+		throw new Error("addFriend requires at least mid, userId, searchId, or phone");
+	}
+
+	async findContact(options: string | FindContactOptions): Promise<LINETypes.Contact> {
+		this.ensureLoggedIn();
+		if (typeof options === "string") {
+			const trimmed = options.trim();
+			if (trimmed.startsWith("u") && trimmed.length === 33) {
+				return await this.getContact(trimmed);
+			}
+			if (trimmed.startsWith("+")) {
+				return await this.relation.findContactByPhoneV3({ phone: trimmed });
+			}
+			return await this.relation.findContactBySearchIdOrTicketV3({ searchId: trimmed });
+		}
+		if (options.mid) {
+			return await this.getContact(options.mid);
+		}
+		if (options.phone) {
+			return await this.relation.findContactByPhoneV3({ phone: options.phone });
+		}
+		if (options.searchId || options.userId) {
+			return await this.relation.findContactBySearchIdOrTicketV3({
+				searchId: options.searchId || options.userId!,
+			});
+		}
+		throw new Error("findContact requires at least mid, searchId, userId, or phone");
+	}
+
 	async getContacts(): Promise<LINETypes.ContactEntry[]> {
 		this.ensureLoggedIn();
 		const ids = await this.base.talk.getAllContactIds();
@@ -783,7 +1403,9 @@ export class LineClient {
 	listen(opts: ListenOptions = { talk: true, square: true, mode: "push" }): void {
 		this.ensureLoggedIn();
 		const mode = opts.mode ?? "push";
-		const signal = opts.signal;
+		const callerSignal = opts.signal;
+		const isAborted = () => Boolean(callerSignal?.aborted || this._abortController.signal.aborted);
+
 		const buildTalkMessage = async (raw: LINETypes.Message): Promise<Message> => {
 			let authorUser: User;
 			try {
@@ -803,10 +1425,12 @@ export class LineClient {
 			});
 		};
 
-		signal?.addEventListener("abort", () => {
-			this.base.push.opStream.close();
-			this.base.push.sqStream.close();
-		});
+		const closeStreams = () => {
+			try { this.base.push?.opStream?.close(); } catch {}
+			try { this.base.push?.sqStream?.close(); } catch {}
+		};
+		callerSignal?.addEventListener("abort", closeStreams);
+		this._abortController.signal.addEventListener("abort", closeStreams);
 
 		const decryptAndEmit = async (event: any) => {
 			if (!event?.message) return;
@@ -850,19 +1474,23 @@ export class LineClient {
 
 		if (opts.talk) {
 			(async () => {
-				while (!signal?.aborted) {
+				let retryCount = 0;
+				while (!isAborted()) {
 					try {
 						if (mode === "push") {
 							const stream = this.base.poll.listenTalkEvents();
 							const reader = stream.getReader();
-							signal?.addEventListener("abort", () => {
+							const cancelReader = () => {
 								try { reader.cancel(); } catch {}
-							});
+							};
+							callerSignal?.addEventListener("abort", cancelReader);
+							this._abortController.signal.addEventListener("abort", cancelReader);
 							try {
-								while (!signal?.aborted) {
+								while (!isAborted()) {
 									const { done, value: event } = await reader.read();
 									if (done) break;
 									if (!event) continue;
+									retryCount = 0;
 									this.base.emit("event" as any, event);
 									if (
 										event.type === "SEND_MESSAGE" ||
@@ -875,13 +1503,17 @@ export class LineClient {
 									}
 								}
 							} finally {
+								callerSignal?.removeEventListener("abort", cancelReader);
+								this._abortController.signal.removeEventListener("abort", cancelReader);
 								reader.releaseLock();
 							}
 						} else {
 							for await (const event of (this.base.poll as any)._listenTalkEvents({
-								signal,
+								signal: callerSignal || this._abortController.signal,
 								pollingInterval: opts.pollingInterval ?? 1000,
 							})) {
+								if (isAborted()) break;
+								retryCount = 0;
 								this.base.emit("event" as any, event);
 								if (
 									event.type === "SEND_MESSAGE" ||
@@ -899,8 +1531,14 @@ export class LineClient {
 							type: "listen:talk:error",
 							data: error,
 						});
+						this.emit("error", error);
+						retryCount++;
+						const backoffDelay = Math.min(1000 * Math.pow(1.5, retryCount), 5000);
+						if (!isAborted()) {
+							await new Promise((r) => setTimeout(r, backoffDelay));
+						}
 					}
-					if (!signal?.aborted) {
+					if (!isAborted()) {
 						await new Promise((r) => setTimeout(r, 1000));
 					}
 				}
@@ -909,19 +1547,23 @@ export class LineClient {
 
 		if (opts.square) {
 			(async () => {
-				while (!signal?.aborted) {
+				let retryCount = 0;
+				while (!isAborted()) {
 					try {
 						if (mode === "push") {
 							const stream = this.base.poll.listenSquareEvents();
 							const reader = stream.getReader();
-							signal?.addEventListener("abort", () => {
+							const cancelReader = () => {
 								try { reader.cancel(); } catch {}
-							});
+							};
+							callerSignal?.addEventListener("abort", cancelReader);
+							this._abortController.signal.addEventListener("abort", cancelReader);
 							try {
-								while (!signal?.aborted) {
+								while (!isAborted()) {
 									const { done, value: event } = await reader.read();
 									if (done) break;
 									if (!event) continue;
+									retryCount = 0;
 									this.base.emit("square:event" as any, event);
 									if (event.type === "NOTIFICATION_MESSAGE") {
 										const sqMsg = event.payload.notificationMessage.squareMessage;
@@ -937,13 +1579,17 @@ export class LineClient {
 									}
 								}
 							} finally {
+								callerSignal?.removeEventListener("abort", cancelReader);
+								this._abortController.signal.removeEventListener("abort", cancelReader);
 								reader.releaseLock();
 							}
 						} else {
 							for await (const event of (this.base.poll as any)._listenSquareEvents({
-								signal,
+								signal: callerSignal || this._abortController.signal,
 								pollingInterval: 1000,
 							})) {
+								if (isAborted()) break;
+								retryCount = 0;
 								this.base.emit("square:event" as any, event);
 								if (event.type === "NOTIFICATION_MESSAGE") {
 									const sqMsg = event.payload.notificationMessage.squareMessage;
@@ -964,8 +1610,14 @@ export class LineClient {
 							type: "listen:square:error",
 							data: error,
 						});
+						this.emit("error", error);
+						retryCount++;
+						const backoffDelay = Math.min(1000 * Math.pow(1.5, retryCount), 5000);
+						if (!isAborted()) {
+							await new Promise((r) => setTimeout(r, backoffDelay));
+						}
 					}
-					if (!signal?.aborted) {
+					if (!isAborted()) {
 						await new Promise((r) => setTimeout(r, 1000));
 					}
 				}
@@ -975,14 +1627,37 @@ export class LineClient {
 
 	// ====== Events ======
 
-	on<K extends keyof ClientEvents>(event: K, listener: (...args: ClientEvents[K] extends (...a: infer P) => any ? P : never) => void): this {
+	on<K extends keyof ClientEvents>(event: K, listener: ClientEvents[K]): this {
 		this.base.on(event as any, listener as any);
 		return this;
 	}
 
-	off<K extends keyof ClientEvents>(event: K, listener: (...args: ClientEvents[K] extends (...a: infer P) => any ? P : never) => void): this {
+	once<K extends keyof ClientEvents>(event: K, listener: ClientEvents[K]): this {
+		this.base.once(event as any, listener as any);
+		return this;
+	}
+
+	off<K extends keyof ClientEvents>(event: K, listener: ClientEvents[K]): this {
 		this.base.off(event as any, listener as any);
 		return this;
+	}
+
+	addListener<K extends keyof ClientEvents>(event: K, listener: ClientEvents[K]): this {
+		return this.on(event, listener);
+	}
+
+	removeListener<K extends keyof ClientEvents>(event: K, listener: ClientEvents[K]): this {
+		return this.off(event, listener);
+	}
+
+	removeAllListeners<K extends keyof ClientEvents>(event?: K): this {
+		this.base.removeAllListeners(event as any);
+		return this;
+	}
+
+	emit<K extends keyof ClientEvents>(event: K, ...args: Parameters<ClientEvents[K]>): boolean {
+		this.base.emit(event as any, ...args as any);
+		return true;
 	}
 
 	// ====== Low-level ======
