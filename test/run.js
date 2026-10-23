@@ -247,13 +247,27 @@ async function testApiStandardization() {
   // v1.0 Lifecycle & Teardown
   assert(c.isDestroyed === false, 'c.isDestroyed is false initially');
   let closeEventFired = false;
+  let connClosed = false;
+  c.base.push.conns = [{ close: () => { connClosed = true; } }];
   c.on('close', () => { closeEventFired = true; });
   await c.close();
   assert(c.isDestroyed === true, 'c.close() marks client as destroyed');
   assert(closeEventFired === true, 'c.close() emits "close" event');
+  assert(connClosed === true, 'c.close() closes active HTTP/2 push connections');
+  assert(Array.isArray(c.base.push.conns) && c.base.push.conns.length === 0, 'c.close() empties push connections list');
   assert(typeof c.destroy === 'function', 'c.destroy exists as an alias');
   assert(typeof c.api.system.close === 'function', 'c.api.system.close() exists');
   assert(typeof c.api.system.destroy === 'function', 'c.api.system.destroy() exists');
+
+  // Verify reply preserves replyTo for media
+  const c2 = new LineClient();
+  let mediaReplyOptions = null;
+  c2.sendImage = async (to, data, replyTo) => {
+    mediaReplyOptions = { to, data, replyTo };
+    return { to, replyTo };
+  };
+  await c2.reply({ channel: { id: 'c999' }, id: 'm123' }, { image: Buffer.from('img') });
+  assert(mediaReplyOptions !== null && mediaReplyOptions.replyTo === 'm123', 'reply({ image }) preserves replyTo for media messages');
 }
 
 // ============================================================

@@ -307,8 +307,9 @@ export class LineObs {
 		filename?: string;
 		/** Optional thumbnail; encrypted with the same keyMaterial. #103. */
 		preview?: Blob;
+		replyTo?: string;
 	}): Promise<Message> {
-		const { data, oType, to, filename, preview } = options;
+		const { data, oType, to, filename, preview, replyTo } = options;
 		const typeSet: {
 			image: [string, 1];
 			video: [string, 2];
@@ -405,6 +406,7 @@ export class LineObs {
 					}
 					: {},
 			},
+			...(replyTo ? { relatedMessageId: replyTo } : {}),
 		});
 	}
 
