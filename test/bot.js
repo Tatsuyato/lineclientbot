@@ -113,18 +113,14 @@ async function main() {
   line.listen({ talk: true, square: true });
 
   // Graceful shutdown
-  process.on('SIGINT', () => {
-    console.log('\n\nShutting down...');
-    line.base.push.opStream.close();
-    line.base.push.sqStream.close();
+  const handleShutdown = async () => {
+    console.log('\n\nShutting down gracefully...');
+    await line.destroy();
     process.exit(0);
-  });
+  };
 
-  process.on('SIGTERM', () => {
-    line.base.push.opStream.close();
-    line.base.push.sqStream.close();
-    process.exit(0);
-  });
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
 }
 
 main().catch(e => {

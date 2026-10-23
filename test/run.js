@@ -166,6 +166,94 @@ async function testApiStandardization() {
   c.getChats = async () => ([{ chatMid: 'c123' }]);
   const chats = await c.api.chats.list();
   assert(Array.isArray(chats) && chats.length === 1, 'api.chats.list maps to getChats');
+
+  // Modern managers & convenience methods
+  assert(typeof c.send === 'function', 'c.send() exists');
+  assert(typeof c.reply === 'function', 'c.reply() exists');
+  assert(typeof c.read === 'function', 'c.read() exists');
+  assert(typeof c.addFriend === 'function', 'c.addFriend() exists');
+  assert(typeof c.findContact === 'function', 'c.findContact() exists');
+  assert(c.messages && typeof c.messages.send === 'function', 'c.messages.send() exists');
+  assert(c.chats && typeof c.chats.list === 'function', 'c.chats.list() exists');
+  assert(c.contacts && typeof c.contacts.list === 'function', 'c.contacts.list() exists');
+  assert(c.squares && typeof c.squares.list === 'function', 'c.squares.list() exists');
+  assert(c.talk !== undefined, 'c.talk direct access exists');
+  assert(c.relation !== undefined, 'c.relation direct access exists');
+  assert(c.buddy !== undefined, 'c.buddy direct access exists');
+  assert(c.e2ee !== undefined, 'c.e2ee direct access exists');
+  assert(c.obs !== undefined, 'c.obs direct access exists');
+
+  // Test c.send polymorphic routing
+  c.sendMessage = async (to, text, replyTo) => ({ to, text, replyTo });
+  c.sendFlex = async (to, altText, flex, replyTo) => ({ to, altText, flex, replyTo });
+
+  const textRes = await c.send('u123', 'test message');
+  assert(textRes.text === 'test message', 'c.send(to, string) routes to sendMessage');
+
+  const flexRes = await c.send('u123', { flex: { type: 'bubble' }, altText: 'Alt' });
+  assert(flexRes.altText === 'Alt' && flexRes.flex.type === 'bubble', 'c.send(to, { flex }) routes to sendFlex');
+
+  const replyRes = await c.reply({ channel: { id: 'c123' }, id: 'm456' }, 'hello reply');
+  assert(replyRes.to === 'c123' && replyRes.replyTo === 'm456', 'c.reply(msg, text) correctly resolves channel and message ID');
+
+  // Typed EventEmitter test (once, emit, removeAllListeners)
+  let onceCount = 0;
+  c.once('ready', (prof) => {
+    onceCount++;
+    assert(prof.displayName === 'ReadyUser', 'Typed once("ready") handler triggered with profile');
+  });
+  c.emit('ready', { displayName: 'ReadyUser', mid: 'u999' });
+  c.emit('ready', { displayName: 'ReadyUser2', mid: 'u999' });
+  assert(onceCount === 1, 'Typed once() fires exactly once');
+
+  let qrUrlFired = '';
+  c.on('qrcall', (url) => { qrUrlFired = url; });
+  c.emit('qrcall', 'https://line.me/R/ti/p/qrcode');
+  assert(qrUrlFired === 'https://line.me/R/ti/p/qrcode', 'Typed emit("qrcall") forwards to on("qrcall")');
+
+  assert(typeof c.addListener === 'function', 'c.addListener exists');
+  assert(typeof c.removeListener === 'function', 'c.removeListener exists');
+  assert(typeof c.removeAllListeners === 'function', 'c.removeAllListeners exists');
+
+  // v1.0 Target Polymorphism
+  const targetObjRes = await c.send({ mid: 'uPolymorphic' }, 'hello target');
+  assert(targetObjRes.to === 'uPolymorphic', 'c.send({ mid }) resolves destination MID correctly');
+
+  const targetChannelRes = await c.send({ channel: { id: 'cGroup123' } }, 'hello channel');
+  assert(targetChannelRes.to === 'cGroup123', 'c.send({ channel: { id } }) resolves destination MID correctly');
+
+  try {
+    await c.send('', 'fail');
+    assert(false, 'c.send with empty target should throw');
+  } catch (e) {
+    assert(e.message.includes('Invalid send target'), 'c.send validates invalid or empty target MID');
+  }
+
+  // v1.0 Media Path & Input Normalization
+  const { resolveMediaBlob } = await import('../dist/esm/index.js');
+  const fileBlobRes = await resolveMediaBlob('package.json');
+  assert(fileBlobRes.filename === 'package.json' && fileBlobRes.blob.size > 0, 'resolveMediaBlob loads disk file and infers filename');
+
+  const bufBlobRes = await resolveMediaBlob(Buffer.from('hello-world'));
+  assert(bufBlobRes.filename === 'file' && bufBlobRes.blob.size === 11, 'resolveMediaBlob accepts Buffer');
+
+  try {
+    await resolveMediaBlob('./non-existent-file-xyz.txt');
+    assert(false, 'resolveMediaBlob with non-existent path should throw');
+  } catch (e) {
+    assert(e.message.includes('Media file not found'), 'resolveMediaBlob rejects non-existent file path');
+  }
+
+  // v1.0 Lifecycle & Teardown
+  assert(c.isDestroyed === false, 'c.isDestroyed is false initially');
+  let closeEventFired = false;
+  c.on('close', () => { closeEventFired = true; });
+  await c.close();
+  assert(c.isDestroyed === true, 'c.close() marks client as destroyed');
+  assert(closeEventFired === true, 'c.close() emits "close" event');
+  assert(typeof c.destroy === 'function', 'c.destroy exists as an alias');
+  assert(typeof c.api.system.close === 'function', 'c.api.system.close() exists');
+  assert(typeof c.api.system.destroy === 'function', 'c.api.system.destroy() exists');
 }
 
 // ============================================================

@@ -40,6 +40,29 @@ export class TypedEventEmitter<
 		return this;
 	}
 
+	public once<E2 extends E>(event: E2, ...listeners: T[E2][]): this {
+		for (const listener of listeners) {
+			if (!(listener instanceof Function)) {
+				throw new TypeError("listeners is not function");
+			}
+			const onceListener = ((...args: any[]) => {
+				this.off(event, onceListener as any);
+				return listener(...args);
+			}) as T[E2];
+			this.on(event, onceListener);
+		}
+		return this;
+	}
+
+	public removeAllListeners<E2 extends E>(event?: E2): this {
+		if (event !== undefined) {
+			this.listeners.delete(event);
+		} else {
+			this.listeners.clear();
+		}
+		return this;
+	}
+
 	public emit<E2 extends E>(event: E2, ...args: Parameters<T[E2]>): this {
 		if (this.listeners.has(event)) {
 			this.listeners.get(event)?.forEach((listener) => listener(...args));
