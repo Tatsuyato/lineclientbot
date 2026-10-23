@@ -381,20 +381,20 @@ export class MessageManager {
 		return this.client.sendFlex(to, altText, flexJson, replyTo);
 	}
 
-	async sendImage(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
-		return this.client.sendImage(to, data);
+	async sendImage(to: SendTarget, data: MediaInput, replyTo?: string): Promise<LINETypes.Message> {
+		return this.client.sendImage(to, data, replyTo);
 	}
 
-	async sendVideo(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
-		return this.client.sendVideo(to, data);
+	async sendVideo(to: SendTarget, data: MediaInput, replyTo?: string): Promise<LINETypes.Message> {
+		return this.client.sendVideo(to, data, replyTo);
 	}
 
-	async sendAudio(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
-		return this.client.sendAudio(to, data);
+	async sendAudio(to: SendTarget, data: MediaInput, replyTo?: string): Promise<LINETypes.Message> {
+		return this.client.sendAudio(to, data, replyTo);
 	}
 
-	async sendFile(to: SendTarget, data: MediaInput, filename?: string): Promise<LINETypes.Message> {
-		return this.client.sendFile(to, data, filename);
+	async sendFile(to: SendTarget, data: MediaInput, filename?: string, replyTo?: string): Promise<LINETypes.Message> {
+		return this.client.sendFile(to, data, filename, replyTo);
 	}
 
 	async sendLocation(
@@ -845,10 +845,20 @@ export class LineClient {
 		} catch {}
 
 		try {
-			this.base.push?.opStream?.close();
+			this.base.push?.opStream?.close?.();
 		} catch {}
 		try {
-			this.base.push?.sqStream?.close();
+			this.base.push?.sqStream?.close?.();
+		} catch {}
+		try {
+			if (Array.isArray(this.base.push?.conns)) {
+				for (const c of this.base.push.conns) {
+					try {
+						c?.close?.();
+					} catch {}
+				}
+				this.base.push.conns = [];
+			}
 		} catch {}
 
 		this.emit("close");
@@ -1016,16 +1026,16 @@ export class LineClient {
 			return this.sendFlex(targetMid, content.altText || "Flex Message", content.flex, content.replyTo);
 		}
 		if ("image" in content && content.image) {
-			return this.sendImage(targetMid, content.image);
+			return this.sendImage(targetMid, content.image, content.replyTo);
 		}
 		if ("video" in content && content.video) {
-			return this.sendVideo(targetMid, content.video);
+			return this.sendVideo(targetMid, content.video, content.replyTo);
 		}
 		if ("audio" in content && content.audio) {
-			return this.sendAudio(targetMid, content.audio);
+			return this.sendAudio(targetMid, content.audio, content.replyTo);
 		}
 		if ("file" in content && content.file) {
-			return this.sendFile(targetMid, content.file, content.filename);
+			return this.sendFile(targetMid, content.file, content.filename, content.replyTo);
 		}
 		if ("sticker" in content && content.sticker) {
 			if (typeof content.sticker === "string") {
@@ -1160,28 +1170,28 @@ export class LineClient {
 		return this.sendChatChecked(chatMid, lastMessageId);
 	}
 
-	async sendImage(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
+	async sendImage(to: SendTarget, data: MediaInput, replyTo?: string): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
 		const targetMid = resolveSendTarget(to);
 		const { blob } = await resolveMediaBlob(data);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "image", to: targetMid });
+		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "image", to: targetMid, replyTo });
 	}
 
-	async sendVideo(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
+	async sendVideo(to: SendTarget, data: MediaInput, replyTo?: string): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
 		const targetMid = resolveSendTarget(to);
 		const { blob } = await resolveMediaBlob(data);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "video", to: targetMid });
+		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "video", to: targetMid, replyTo });
 	}
 
-	async sendAudio(to: SendTarget, data: MediaInput): Promise<LINETypes.Message> {
+	async sendAudio(to: SendTarget, data: MediaInput, replyTo?: string): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
 		const targetMid = resolveSendTarget(to);
 		const { blob } = await resolveMediaBlob(data);
-		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "audio", to: targetMid });
+		return await this.base.obs.uploadMediaByE2EE({ data: blob, oType: "audio", to: targetMid, replyTo });
 	}
 
-	async sendFile(to: SendTarget, data: MediaInput, filename?: string): Promise<LINETypes.Message> {
+	async sendFile(to: SendTarget, data: MediaInput, filename?: string, replyTo?: string): Promise<LINETypes.Message> {
 		this.ensureLoggedIn();
 		const targetMid = resolveSendTarget(to);
 		const resolved = await resolveMediaBlob(data, filename);
@@ -1190,6 +1200,7 @@ export class LineClient {
 			oType: "file",
 			to: targetMid,
 			filename: filename || resolved.filename,
+			replyTo,
 		});
 	}
 
